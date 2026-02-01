@@ -132,7 +132,7 @@ Below is a minimal, working example. It answers a real policy question using a t
 
 For guidance on choosing models, see **[Azure OpenAI model selection](https://learn.microsoft.com/azure/ai-services/openai/concepts/models)**.
 
-### Full example (single file)
+### Full example
 
 **agent.py**
 
@@ -322,15 +322,6 @@ pip install semantic-kernel
 # 3) Run the agent
 python agent.py
 ```
-
-**Terminal Output**
-
-```text
-Ask a policy question (e.g., release freeze timing or SEV1 escalation): Who assigns the incident commander in a SEV1?
-The Incident Commander (IC) is assigned within 15 minutes of declaration. The on‑call team or engineering manager can assign the IC, and the IC then coordinates the response.
-```
-
----
 
 ### Closing note
 Try swapping the FAQ `.txt` files, add one more tool, and watch how the loop behaves. You can also tweak the **prompt**, change the **model deployment**, or adjust **temperature/max_tokens** to see how the agent’s behavior shifts. Keeping changes small and observable is the fastest way to get confident with agents.
