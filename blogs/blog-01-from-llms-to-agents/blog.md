@@ -213,31 +213,7 @@ if __name__ == "__main__":
 
 ---
 
-## Example run
-**Terminal**
-
-```bash
-# 1) Create and activate a virtual environment
-python -m venv .venv
-.venv\Scripts\activate
-
-# 2) Install the SDK
-pip install semantic-kernel
-
-# 3) Run the agent
-python agent.py
-```
-
-**Terminal Output**
-
-```text
-Ask a policy question (e.g., release freeze timing or SEV1 escalation): Who assigns the incident commander in a SEV1?
-The Incident Commander (IC) is assigned within 15 minutes of declaration. The on‑call team or engineering manager can assign the IC, and the IC then coordinates the response.
-```
-
----
-
-## Optional: serve the agent via API + simple UI
+## Serve the agent via API + simple UI (final step)
 Keeping the **backend (API)** separate from the **frontend (UI)** is a standard practice. It makes the agent reusable across multiple clients.
 
 ```mermaid
@@ -328,6 +304,30 @@ if st.button("Ask") and question:
 ```bash
 pip install streamlit requests
 streamlit run streamlit.py
+```
+
+---
+
+## Example run
+**Terminal**
+
+```bash
+# 1) Create and activate a virtual environment
+python -m venv .venv
+.venv\Scripts\activate
+
+# 2) Install the SDK
+pip install semantic-kernel
+
+# 3) Run the agent
+python agent.py
+```
+
+**Terminal Output**
+
+```text
+Ask a policy question (e.g., release freeze timing or SEV1 escalation): Who assigns the incident commander in a SEV1?
+The Incident Commander (IC) is assigned within 15 minutes of declaration. The on‑call team or engineering manager can assign the IC, and the IC then coordinates the response.
 ```
 
 ---
