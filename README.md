@@ -14,7 +14,7 @@ Create a practical, code‑first series that explains not just **how** to build 
 
 ## Blog Outline & Intent
 
-1. **From LLMs to AI Agents — Why a Prompt Is Not Enough**
+1. **[From LLMs to AI Agents — Why a Prompt Is Not Enough](blogs/blog-01-from-llms-to-agents/blog.md)**
    Explains how LLMs differ from agents (state, tools, control loops) and introduces a minimal agent to justify why an agent architecture is required.
 
 2. **Choosing an Agent Framework & Building the First Agent**
