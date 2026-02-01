@@ -15,30 +15,27 @@ Create a practical, code‑first series that explains not just **how** to build 
 ## Blog Outline & Intent
 
 1. **[From LLMs to AI Agents — Why a Prompt Is Not Enough](blogs/blog-01-from-llms-to-agents/blog.md)**
-   Explains how LLMs differ from agents (state, tools, control loops) and introduces a minimal agent to justify why an agent architecture is required.
+   Explains how LLMs differ from agents (state, tools, control loops), surveys agent frameworks, and implements the first minimal agent using Semantic Kernel as a concrete example.
 
-2. **Choosing an Agent Framework & Building the First Agent**
-   Briefly surveys common agent frameworks and selection criteria, then implements the first agent using Semantic Kernel as a concrete example.
-
-3. **Controlling Agent Behaviour — Prompt Engineering and State**
+2. **Controlling Agent Behaviour — Prompt Engineering and State**
    Introduces prompts as control mechanisms (not text generation) and shows how explicit agent state enables predictable, debuggable behaviour.
 
-4. **Teaching the Agent to Use Knowledge — Retrieval‑Augmented Generation (RAG)**
+3. **Teaching the Agent to Use Knowledge — Retrieval‑Augmented Generation (RAG)**
    Demonstrates why context windows are insufficient and adds document retrieval to ground agent responses in enterprise knowledge.
 
-5. **Teaching the Agent to Act — Tools, APIs, and Data Access**
+4. **Teaching the Agent to Act — Tools, APIs, and Data Access**
    Extends the agent with tools so it can take actions (search, data access, drafting outputs) instead of only responding in text.
 
-6. **When a Single Agent Breaks — Introducing Multi‑Agent Systems**
+5. **When a Single Agent Breaks — Introducing Multi‑Agent Systems**
    Shows practical failure modes of a single agent (context overload, conflicting goals) and motivates the need for multiple specialised agents.
 
-7. **Coordinating Multiple Agents — Orchestration, State, and Control**
+6. **Coordinating Multiple Agents — Orchestration, State, and Control**
    Implements a multi‑agent workflow with clear roles, orchestration logic, and controlled state sharing.
 
-8. **From Development to Production — Architecture, Security, and Governance**
+7. **From Development to Production — Architecture, Security, and Governance**
    Covers what changes when moving to production: deployment architecture, security boundaries, identity, observability, and cost control.
 
-9. **Production Deep Dives (Optional Follow‑ups)**
+8. **Production Deep Dives (Optional Follow‑ups)**
    Branch blogs covering implementation details such as Azure deployment, Azure AD integration, RBAC/RLS, monitoring, and evaluation.
 
 ## Outcome
