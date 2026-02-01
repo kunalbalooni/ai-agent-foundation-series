@@ -5,6 +5,8 @@ You have probably used tools like **[ChatGPT](https://chat.openai.com/)**, **[Gr
 
 Large Language Models (LLMs) are powerful, but a prompt alone is not enough for real systems. A helpful assistant must **retrieve the right context** (for example, the latest policy page instead of whatever you pasted last week), **take actions through tools** (like querying a database or calling an API), and **keep state** (remembering earlier steps in a workflow or a multi‑turn investigation). That is what AI agents add on top of LLMs.
 
+In this post, we will build a small **internal policy assistant** that answers release‑freeze and incident questions, and use it as the running example for the series.
+
 ---
 
 ## LLM vs Agent
@@ -28,6 +30,8 @@ An agent is a **goal‑driven system** that wraps an LLM with three critical cap
 1. **Tools** — the ability to call APIs or functions
 2. **State** — memory and context across steps
 3. **Control loop** — a repeatable plan/act/observe cycle
+
+State is what lets the agent remember you already asked for the SEV1 policy, so it does not re‑fetch it every turn.
 
 ```mermaid
 flowchart TB
@@ -114,6 +118,8 @@ Before jumping into code, it helps to scan the **agent frameworks and SDKs** you
 | **[Azure AI Studio](https://ai.azure.com/)** | Azure-native build & deploy | Unified model catalog, evaluation and deployment | Azure-centric workflows |
 
 For the examples below, we will use **Semantic Kernel (Python)** as a **code‑first** option. The overall flow stays very similar across most frameworks, so feel free to map the same steps to the SDK you prefer.
+
+**Takeaway:** if you are in Azure/.NET or want strong tool integration, Semantic Kernel is a solid baseline; if you want the broadest ecosystem for prototypes, LangChain or LlamaIndex may feel faster.
 
 ---
 
@@ -216,6 +222,8 @@ if __name__ == "__main__":
 ## Serve the agent via API + simple UI
 Keeping the **backend (API)** separate from the **frontend (UI)** is a standard practice. It makes the agent reusable across multiple clients.
 
+This separation mirrors how production agents are deployed later in the series.
+
 ```mermaid
 flowchart LR
   User[👤 User] --> FE_UI
@@ -311,6 +319,8 @@ curl -X POST http://127.0.0.1:8000/ask \
 # 6) Run the Streamlit UI in another terminal
 streamlit run streamlit.py
 ```
+
+**What’s next:** in the next post we will compare frameworks in more depth and build the first full agent in Semantic Kernel.
 
 ### Closing note
 Try swapping the FAQ `.txt` files, add one more tool, and watch how the loop behaves. You can also tweak the **prompt**, change the **model deployment**, or adjust **temperature/max_tokens** to see how the agent’s behavior shifts. Keeping changes small and observable is the fastest way to get confident with agents.
