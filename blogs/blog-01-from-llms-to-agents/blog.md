@@ -266,21 +266,6 @@ async def ask(query: Query):
     return {"answer": answer}
 ```
 
-**Terminal**
-
-```bash
-pip install fastapi uvicorn
-uvicorn api:app --reload
-```
-
-**Terminal (curl)**
-
-```bash
-curl -X POST http://127.0.0.1:8000/ask \
-  -H "Content-Type: application/json" \
-  -d "{\"question\": \"When does release freeze start?\"}"
-```
-
 ### Simple Streamlit UI
 **streamlit.py**
 
@@ -299,28 +284,32 @@ if st.button("Ask") and question:
         st.error("Request failed")
 ```
 
-**Terminal**
-
-```bash
-pip install streamlit requests
-streamlit run streamlit.py
-```
-
 ---
 
 ## Example run
-**Terminal**
+**All terminal commands (ordered)**
 
 ```bash
 # 1) Create and activate a virtual environment
 python -m venv .venv
 .venv\Scripts\activate
 
-# 2) Install the SDK
-pip install semantic-kernel
+# 2) Install the SDK + API/UI dependencies
+pip install semantic-kernel fastapi uvicorn streamlit requests
 
-# 3) Run the agent
+# 3) Run the agent locally (CLI)
 python agent.py
+
+# 4) Start the API server (keep this running)
+uvicorn api:app --reload
+
+# 5) Test the API in a new terminal
+curl -X POST http://127.0.0.1:8000/ask \
+  -H "Content-Type: application/json" \
+  -d "{\"question\": \"When does release freeze start?\"}"
+
+# 6) Run the Streamlit UI in another terminal
+streamlit run streamlit.py
 ```
 
 ### Closing note
