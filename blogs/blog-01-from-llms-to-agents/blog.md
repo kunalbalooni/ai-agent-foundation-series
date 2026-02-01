@@ -213,7 +213,7 @@ if __name__ == "__main__":
 
 ---
 
-## Serve the agent via API + simple UI (final step)
+## Serve the agent via API + simple UI
 Keeping the **backend (API)** separate from the **frontend (UI)** is a standard practice. It makes the agent reusable across multiple clients.
 
 ```mermaid
@@ -287,7 +287,7 @@ if st.button("Ask") and question:
 ---
 
 ## Example run
-**All terminal commands (ordered)**
+**All terminal commands**
 
 ```bash
 # 1) Create and activate a virtual environment
