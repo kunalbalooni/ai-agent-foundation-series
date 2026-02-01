@@ -320,7 +320,7 @@ curl -X POST http://127.0.0.1:8000/ask \
 streamlit run streamlit.py
 ```
 
-**What’s next:** in the next post we will compare frameworks in more depth and build the first full agent in Semantic Kernel.
+**What’s next:** in the next post we will focus on prompt engineering and explicit agent state to make behavior predictable and debuggable.
 
 ### Closing note
 Try swapping the FAQ `.txt` files, add one more tool, and watch how the loop behaves. You can also tweak the **prompt**, change the **model deployment**, or adjust **temperature/max_tokens** to see how the agent’s behavior shifts. Keeping changes small and observable is the fastest way to get confident with agents.
