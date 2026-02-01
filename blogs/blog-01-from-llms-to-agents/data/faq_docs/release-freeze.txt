@@ -1,0 +1,37 @@
+Release Freeze Policy
+
+Purpose
+The release freeze is a controlled period designed to reduce risk before a scheduled production release. During this window, changes that could affect stability are restricted so that the team can focus on validation, incident response readiness, and release communications.
+
+When the freeze starts
+- The standard release freeze begins **48 hours before** the monthly release window.
+- Example: If the release window starts on Friday at 18:00 UTC, the freeze begins on Wednesday at 18:00 UTC.
+
+What is allowed during the freeze
+- Emergency fixes for SEV1 and SEV2 incidents with explicit approval from the Incident Commander or Release Manager.
+- Documentation updates (README, SOPs) that do not change runtime behavior.
+- Configuration changes that are low-risk and approved by the Release Manager.
+
+What is not allowed during the freeze
+- New feature deployments.
+- Schema changes or data migrations.
+- Infrastructure changes that could alter capacity, routing, or networking.
+
+Approval process for exceptions
+1. File a release-freeze exception request in the #release-management channel.
+2. Include: summary of change, risk assessment, rollback plan, and test evidence.
+3. The Release Manager must approve the request before deployment.
+
+Rollback expectations
+- Every allowed change must include a rollback procedure.
+- Rollback should be executable within 30 minutes.
+
+Communication
+- Announce the start of freeze in #engineering and #support.
+- Post a reminder 24 hours before the release window.
+
+FAQ
+- Q: Can we deploy a small UI fix?
+  A: Only if it is tied to an incident and approved as an exception.
+- Q: Are feature flags allowed?
+  A: Only if the flag is already deployed and the change is a safe toggle.

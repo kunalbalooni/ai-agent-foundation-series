@@ -1,0 +1,33 @@
+SEV1 Incident Policy
+
+Definition
+A SEV1 incident is a critical outage or security event that causes a complete loss of service, significant data risk, or a major customer impact. SEV1 incidents require immediate, coordinated response.
+
+Initial response timeline
+- **Within 5 minutes:** Acknowledge the alert and declare incident in #incidents.
+- **Within 15 minutes:** Assign an Incident Commander (IC).
+- **Within 30 minutes:** Establish a mitigation plan and status update cadence.
+
+Roles and responsibilities
+- Incident Commander (IC): Owns coordination, prioritization, and decisions.
+- Communications Lead: Sends external and internal updates.
+- Tech Leads: Execute mitigation tasks and provide technical updates.
+
+Status updates
+- Internal updates every 15 minutes in #incidents.
+- External updates every 30 minutes on the status page.
+
+Escalation rules
+- Escalate to on-call engineering manager if mitigation is not found within 45 minutes.
+- Escalate to VP Engineering if the incident exceeds 2 hours.
+
+Post‑incident requirements
+- Publish a root cause analysis (RCA) within 5 business days.
+- Record a list of follow‑up actions and owners.
+- Review the incident in the weekly reliability meeting.
+
+FAQ
+- Q: Who can declare a SEV1?
+  A: On‑call engineers, ICs, or engineering managers.
+- Q: Can we deploy a hotfix during SEV1?
+  A: Yes, with IC approval and a documented rollback plan.
