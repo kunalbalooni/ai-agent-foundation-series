@@ -146,6 +146,8 @@ Below is a minimal, working example. It answers a real policy question using a t
 
 For guidance on choosing models, see **[Azure OpenAI model selection](https://learn.microsoft.com/azure/ai-services/openai/concepts/models)**.
 
+> **No Azure subscription yet?** **[free-llm-api-resources](https://github.com/cheahjs/free-llm-api-resources)** is a regularly updated GitHub repository that tracks free tiers, trial credits, and open-access endpoints across many providers. It is a practical starting point if you want to experiment before committing to a paid service.
+
 ### Full example
 
 **agent.py**
