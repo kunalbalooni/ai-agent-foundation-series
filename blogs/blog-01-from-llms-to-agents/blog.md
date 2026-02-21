@@ -105,19 +105,27 @@ Before jumping into code, it helps to scan the **agent frameworks and SDKs** you
 6. **Learning curve** — How fast a beginner can ship something useful.
 
 ### Quick comparison (high-level)
-| Framework / SDK | Best for | Strengths | Trade-offs |
-|---|---|---|---|
-| **[Semantic Kernel](https://github.com/microsoft/semantic-kernel)** | Enterprise agents, structured tools | Strong .NET and Python support, tool-first design, integrates well with Azure | Smaller ecosystem than LangChain, fewer community examples |
-| **[LangChain](https://www.langchain.com/)** | Rapid prototyping, broad ecosystem | Large community, many integrations, lots of examples | Can feel abstract, harder to debug complex chains |
-| **[LlamaIndex](https://www.llamaindex.ai/)** | Data-centric applications | Excellent retrieval/RAG tooling | Not a full agent framework by itself |
-| **[AutoGen](https://github.com/microsoft/autogen)** | Multi-agent research | Strong multi-agent patterns, active research | More experimental for production |
-| **[CrewAI](https://www.crewai.com/)** | Role-based agent teams | Simple multi-agent design patterns | Limited enterprise features |
-| **[n8n](https://n8n.io/)** | Low-code workflows | Visual orchestration, great for non-devs, fast automation | Less flexible for custom agent logic, not code-first |
-| **[AWS Strands](https://aws.amazon.com/)** | AWS-native agent stacks | Tight AWS integrations, enterprise deployment patterns | AWS-leaning, smaller community outside AWS |
-| **[Copilot Studio](https://www.microsoft.com/microsoft-copilot/microsoft-copilot-studio)** | Business users, M365 ecosystem | Easy UI, Microsoft ecosystem integration | Less control for custom architectures, platform constraints |
-| **[Azure AI Studio](https://ai.azure.com/)** | Azure-native build & deploy | Unified model catalog, evaluation and deployment | Azure-centric workflows |
+| Framework / SDK | Best for | Strengths | Trade-offs | Recommendation |
+|---|---|---|---|---|
+| **[Semantic Kernel](https://github.com/microsoft/semantic-kernel)** | Enterprise agents, structured tools | Strong .NET and Python support, tool-first design, integrates well with Azure | Smaller ecosystem than LangChain, fewer community examples | **Best for Azure / .NET enterprise teams** |
+| **[LangChain](https://www.langchain.com/)** | Rapid prototyping, broad ecosystem | Large community, many integrations, lots of examples | Can feel abstract, harder to debug complex chains | **Best for beginners & rapid prototyping** |
+| **[LlamaIndex](https://www.llamaindex.ai/)** | Data-centric applications | Excellent retrieval/RAG tooling | Not a full agent framework by itself | **Best for RAG & data-heavy applications** |
+| **[AutoGen](https://github.com/microsoft/autogen)** | Multi-agent research | Strong multi-agent patterns, active research | More experimental for production | **Best for multi-agent research & experimentation** |
+| **[CrewAI](https://www.crewai.com/)** | Role-based agent teams | Simple multi-agent design patterns | Limited enterprise features | **Best for quick role-based agent prototypes** |
+| **[n8n](https://n8n.io/)** | Low-code workflows | Visual orchestration, great for non-devs, fast automation | Less flexible for custom agent logic, not code-first | **Best for non-developers & low-code automation** |
+| **[AWS Strands](https://aws.amazon.com/)** | AWS-native agent stacks | Tight AWS integrations, enterprise deployment patterns | AWS-leaning, smaller community outside AWS | **Best for AWS-native production stacks** |
+| **[Copilot Studio](https://www.microsoft.com/microsoft-copilot/microsoft-copilot-studio)** | Business users, M365 ecosystem | Easy UI, Microsoft ecosystem integration | Less control for custom architectures, platform constraints | **Best for M365 business users, no coding needed** |
+| **[Azure AI Studio](https://ai.azure.com/)** | Azure-native build & deploy | Unified model catalog, evaluation and deployment | Azure-centric workflows | **Best for Azure-native build & deployment pipelines** |
 
 For the examples below, we will use **Semantic Kernel (Python)** as a **code‑first** option. The overall flow stays very similar across most frameworks, so feel free to map the same steps to the SDK you prefer.
+
+> **How to pick — a quick guide:**
+> - **Just starting out?** → Start with **LangChain** (largest community, most tutorials and integrations) or **CrewAI** (simple role-based patterns with minimal boilerplate).
+> - **Enterprise / Azure shop?** → Go with **Semantic Kernel** (production-ready, strong .NET + Python, native Azure integration) or **Azure AI Studio** for a managed end-to-end pipeline.
+> - **Building on AWS?** → **AWS Strands** gives you tight AWS-native deployment patterns and integrations out of the box.
+> - **Building a knowledge base or RAG pipeline?** → **LlamaIndex** is purpose-built for retrieval-heavy use cases; pair it with Semantic Kernel or LangChain for the agent orchestration layer.
+> - **Non-technical stakeholders driving the build?** → **Copilot Studio** or **n8n** let business users configure and run workflows without writing code.
+> - **Researching advanced multi-agent patterns?** → **AutoGen** is the go-to for experimenting with agent-to-agent communication and coordination.
 
 **Takeaway:** if you are in Azure/.NET or want strong tool integration, Semantic Kernel is a solid baseline; if you want the broadest ecosystem for prototypes, LangChain or LlamaIndex may feel faster.
 
@@ -151,10 +159,15 @@ from semantic_kernel.agents import ChatCompletionAgent
 from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion, OpenAIChatPromptExecutionSettings
 from semantic_kernel.functions import kernel_function, KernelArguments
 
-# Azure OpenAI environment variables
+# --- Configuration ---
+# Load credentials from a .env file so secrets never appear in source code.
+# Falls back to real environment variables if .env is absent (e.g. in CI/CD).
+from dotenv import load_dotenv
+load_dotenv()
+
 AZURE_OPENAI_ENDPOINT = os.environ["AZURE_OPENAI_ENDPOINT"]
 AZURE_OPENAI_KEY = os.environ["AZURE_OPENAI_API_KEY"]
-AZURE_OPENAI_DEPLOYMENT = os.environ["AZURE_OPENAI_DEPLOYMENT"]
+AZURE_OPENAI_DEPLOYMENT = os.environ["AZURE_OPENAI_DEPLOYMENT"]  # e.g. "gpt-4o-mini"
 
 FAQ_DIR = Path("./faq_docs")  # Folder containing .txt files
 
@@ -165,8 +178,11 @@ def load_faq_docs() -> dict[str, str]:
         docs[path.stem] = path.read_text(encoding="utf-8").strip()
     return docs
 
-FAQ = load_faq_docs()
+FAQ = load_faq_docs()  # Loaded once at startup; acts as the agent's private knowledge base
 
+# --- Tool definition ---
+# This class is the agent's only "action": retrieve a policy document by name.
+# The @kernel_function decorator registers it so the LLM can invoke it by name.
 class InternalFaqTool:
     @kernel_function(
         name="lookup_faq",
@@ -175,6 +191,9 @@ class InternalFaqTool:
     def lookup_faq(self, key: str) -> str:
         return FAQ.get(key, "No policy found for that key.")
 
+# --- System prompt ---
+# Shapes the agent's persona, scope, and when to call the tool.
+# The LLM reads this on every turn to decide how to respond.
 instructions = """
 You are a helpful internal knowledge assistant.
 If you need a policy, call the lookup_faq tool.
@@ -184,24 +203,32 @@ You can answer questions about:
 - SEV1 incident handling, roles, escalation, and communication
 """
 
+# --- LLM parameters ---
+# These settings are passed to the LLM on every call.
 settings = OpenAIChatPromptExecutionSettings(
     temperature=0.2,  # Lower temperature for more consistent, factual responses
     max_tokens=500,   # Limit output length
     tool_choice="auto",  # Let the model decide when to call tools
 )
 
+# --- Agent assembly ---
+# Wires together the LLM service, system prompt, tool, and call settings.
+# AzureChatCompletion is the LLM call that drives all reasoning and responses.
 _agent = ChatCompletionAgent(
-    service=AzureChatCompletion(
+    service=AzureChatCompletion(       # LLM: connects to Azure OpenAI
         deployment_name=AZURE_OPENAI_DEPLOYMENT,
         endpoint=AZURE_OPENAI_ENDPOINT,
         api_key=AZURE_OPENAI_KEY,
     ),
     name="Policy-Assistant",
     instructions=instructions,
-    plugins=[InternalFaqTool()],
+    plugins=[InternalFaqTool()],       # Tools the LLM is allowed to call
     arguments=KernelArguments(settings),
 )
 
+# --- Agent loop entry point ---
+# get_response triggers the full plan → act → observe cycle:
+# the LLM decides whether to call a tool or respond directly.
 async def ask_agent(question: str) -> str:
     response = await _agent.get_response(messages=question)
     return response.content
@@ -226,7 +253,7 @@ This separation mirrors how production agents are deployed later in the series.
 
 ```mermaid
 flowchart LR
-  User[👤 User] --> FE_UI
+  User[User] --> FE_UI
 
   subgraph Frontend
     FE_UI[Browser UI - Streamlit]
@@ -261,16 +288,20 @@ flowchart LR
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-from agent import ask_agent
+from agent import ask_agent  # Imports the agent loop defined in agent.py
 
 app = FastAPI()
 
+# Request schema — validates and documents the expected JSON body
 class Query(BaseModel):
     question: str
 
+# POST /ask — receives the user's question and returns the agent's answer.
+# Keeping this thin means the same agent can be reused by any client
+# (CLI, Streamlit, Slack bot, etc.) without changing agent.py.
 @app.post("/ask")
 async def ask(query: Query):
-    answer = await ask_agent(query.question)
+    answer = await ask_agent(query.question)  # Delegates to the agent loop (LLM call happens here)
     return {"answer": answer}
 ```
 
@@ -285,9 +316,11 @@ st.title("Policy Assistant")
 question = st.text_input("Ask a policy question")
 
 if st.button("Ask") and question:
+    # Send the question to the FastAPI backend via HTTP POST.
+    # The backend delegates to the agent, which calls the LLM and returns an answer.
     response = requests.post("http://127.0.0.1:8000/ask", json={"question": question})
     if response.ok:
-        st.write(response.json()["answer"])
+        st.write(response.json()["answer"])  # Display the agent's response
     else:
         st.error("Request failed")
 ```
@@ -300,23 +333,29 @@ if st.button("Ask") and question:
 ```bash
 # 1) Create and activate a virtual environment
 python -m venv .venv
-.venv\Scripts\activate
+.venv\Scripts\activate          # Windows
+# source .venv/bin/activate     # macOS / Linux
 
-# 2) Install the SDK + API/UI dependencies
-pip install semantic-kernel fastapi uvicorn streamlit requests
+# 2) Install dependencies from requirements.txt
+pip install -r requirements.txt
 
-# 3) Run the agent locally (CLI)
+# 3) Create a .env file from the provided template and fill in your credentials
+# .env is already listed in .gitignore — never commit real secrets to source control
+cp .env.template .env
+# Then open .env and replace the placeholder values with your Azure OpenAI details
+
+# 4) Run the agent locally (CLI)
 python agent.py
 
-# 4) Start the API server (keep this running)
+# 5) Start the API server (keep this running)
 uvicorn api:app --reload
 
-# 5) Test the API in a new terminal
+# 6) Test the API in a new terminal
 curl -X POST http://127.0.0.1:8000/ask \
   -H "Content-Type: application/json" \
   -d "{\"question\": \"When does release freeze start?\"}"
 
-# 6) Run the Streamlit UI in another terminal
+# 7) Run the Streamlit UI in another terminal
 streamlit run streamlit.py
 ```
 
