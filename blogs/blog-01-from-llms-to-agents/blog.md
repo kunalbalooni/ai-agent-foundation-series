@@ -336,16 +336,13 @@ python -m venv .venv
 .venv\Scripts\activate          # Windows
 # source .venv/bin/activate     # macOS / Linux
 
-# 2) Install the SDK + API/UI dependencies
-pip install semantic-kernel fastapi uvicorn streamlit requests python-dotenv
+# 2) Install dependencies from requirements.txt
+pip install -r requirements.txt
 
-# 3) Create a .env file with your Azure OpenAI credentials
-# Add this file to .gitignore — never commit secrets to source control
-cat > .env <<'EOF'
-AZURE_OPENAI_ENDPOINT=https://<your-resource>.openai.azure.com/
-AZURE_OPENAI_API_KEY=<your-api-key>
-AZURE_OPENAI_DEPLOYMENT=gpt-4o-mini
-EOF
+# 3) Create a .env file from the provided template and fill in your credentials
+# .env is already listed in .gitignore — never commit real secrets to source control
+cp .env.template .env
+# Then open .env and replace the placeholder values with your Azure OpenAI details
 
 # 4) Run the agent locally (CLI)
 python agent.py

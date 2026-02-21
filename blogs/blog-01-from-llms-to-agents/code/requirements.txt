@@ -1,0 +1,18 @@
+# Core agent framework
+semantic-kernel>=1.0.0
+
+# LLM connector (Azure OpenAI is included in semantic-kernel extras)
+openai>=1.0.0
+
+# API server
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+
+# Frontend UI
+streamlit>=1.33.0
+
+# HTTP client (used by Streamlit UI to call the API)
+requests>=2.31.0
+
+# Credentials management — loads variables from a .env file
+python-dotenv>=1.0.0
