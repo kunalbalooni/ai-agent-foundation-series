@@ -137,6 +137,8 @@ The model may infer the right context from wording alone, but inference-based co
 
 Semantic Kernel provides a `ChatHistory` object that accumulates messages across turns. We create one per session, append each exchange to it, and pass the whole object to `invoke()` instead of the bare string.
 
+`get_response()` — used in the previous post — only accepts a string or a single message; it has no way to receive a `ChatHistory`. `invoke()` is the SK method designed for this: it takes the full history and drives the plan → act → observe loop across all its steps. The switch from `get_response()` to `invoke()` is a consequence of needing to pass history, not a preference.
+
 ```mermaid
 sequenceDiagram
     participant User
@@ -205,7 +207,7 @@ The code directory for this post contains the complete updated files. The change
 
 | File | What changes |
 |---|---|
-| `agent.py` | `instructions` → structured `INSTRUCTIONS`; `get_response(str)` → `invoke(ChatHistory)`; session store added; `reset_session()` added |
+| `agent.py` | `instructions` → structured `INSTRUCTIONS`; `temperature` 0.2 → 0.1, `max_tokens` 500 → 600; `get_response(str)` → `invoke(ChatHistory)`; session store added; `reset_session()` added |
 | `api.py` | `Query` gains `session_id` field; `/reset` endpoint added |
 | `streamlit.py` | Single `st.text_input` → multi-turn `st.chat_input` with full chat history display and a reset button |
 
@@ -307,12 +309,34 @@ async def ask_agent(question: str, session_id: str = "default") -> str:
     return response_text
 ```
 
-**6. Replace `main()` with an interactive multi-turn loop**
+**6. Lower `temperature` and raise `max_tokens`**
+
+```python
+# Before
+SETTINGS = OpenAIChatPromptExecutionSettings(
+    temperature=0.2,
+    max_tokens=500,
+    tool_choice="auto",
+)
+
+# After
+SETTINGS = OpenAIChatPromptExecutionSettings(
+    temperature=0.1,
+    max_tokens=600,
+    tool_choice="auto",
+)
+```
+
+`temperature=0.1` tightens the structured prompt's effect: the lower the temperature, the more the model follows the exact format and scope rules rather than paraphrasing them. `max_tokens=600` gives a little extra headroom now that answers may include a bulleted list plus a "Source:" line. The experiment section uses these values as the baseline — change temperature first when testing prompt sensitivity.
+
+**7. Replace `main()` with an interactive multi-turn loop**
 
 ```python
 # Before — single question, then exit
 async def main() -> None:
-    user_question = input("Ask a policy question: ").strip()
+    user_question = input(
+        "Ask a policy question (e.g., release freeze timing or SEV1 escalation): "
+    ).strip()
     answer = await ask_agent(user_question)
     print(answer)
 
@@ -406,27 +430,37 @@ for msg in st.session_state.messages:
 question = st.chat_input("Ask a policy question...")
 
 if question:
+    # Display the user's message immediately (before waiting for the API)
     st.session_state.messages.append({"role": "user", "content": question})
     with st.chat_message("user"):
         st.write(question)
 
-    # Send to backend — session_id ensures the agent uses the right history
+    # Send to the FastAPI backend — session_id ensures the agent uses the right history
     response = requests.post(
         f"{API_URL}/ask",
         json={"question": question, "session_id": st.session_state.session_id},
     )
-    answer = response.json()["answer"] if response.ok else "Request failed. Is the API server running?"
+    if response.ok:
+        answer = response.json()["answer"]  # LLM response, grounded by the policy tool
+    else:
+        answer = "Request failed. Is the API server running?"
 
+    # Persist and display the agent's response
     st.session_state.messages.append({"role": "assistant", "content": answer})
     with st.chat_message("assistant"):
         st.write(answer)
 
-# Sidebar: reset clears both the local display and the server-side ChatHistory
+# Sidebar: reset button clears both the local display and the server-side ChatHistory
 with st.sidebar:
     st.header("Session")
     st.write(f"Session ID: `{st.session_state.session_id[:8]}...`")
     if st.button("Reset conversation"):
-        requests.post(f"{API_URL}/reset", json={"session_id": st.session_state.session_id})
+        # Clear server-side ChatHistory for this session
+        requests.post(
+            f"{API_URL}/reset",
+            json={"session_id": st.session_state.session_id},
+        )
+        # Clear local display
         st.session_state.messages = []
         st.rerun()
 ```
