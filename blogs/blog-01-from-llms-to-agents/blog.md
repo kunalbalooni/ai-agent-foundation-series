@@ -171,7 +171,7 @@ AZURE_OPENAI_ENDPOINT = os.environ["AZURE_OPENAI_ENDPOINT"]
 AZURE_OPENAI_KEY = os.environ["AZURE_OPENAI_API_KEY"]
 AZURE_OPENAI_DEPLOYMENT = os.environ["AZURE_OPENAI_DEPLOYMENT"]  # e.g. "gpt-4o-mini"
 
-FAQ_DIR = Path("./faq_docs")  # Folder containing .txt files
+FAQ_DIR = Path("../data/faq_docs")
 
 def load_faq_docs() -> dict[str, str]:
     """Load each .txt file into a {key: content} dictionary."""
@@ -188,10 +188,11 @@ FAQ = load_faq_docs()  # Loaded once at startup; acts as the agent's private kno
 class InternalFaqTool:
     @kernel_function(
         name="lookup_faq",
-        description="Lookup internal policy or FAQ by key",
+        description="Lookup an internal policy document by key. "
+                    "Valid keys: 'release-freeze', 'incident-sev1'.",
     )
     def lookup_faq(self, key: str) -> str:
-        return FAQ.get(key, "No policy found for that key.")
+        return FAQ.get(key, "Policy not found. Please check with your Release Manager.")
 
 # --- System prompt ---
 # Shapes the agent's persona, scope, and when to call the tool.
@@ -207,7 +208,7 @@ You can answer questions about:
 
 # --- LLM parameters ---
 # These settings are passed to the LLM on every call.
-settings = OpenAIChatPromptExecutionSettings(
+SETTINGS = OpenAIChatPromptExecutionSettings(
     temperature=0.2,  # Lower temperature for more consistent, factual responses
     max_tokens=500,   # Limit output length
     tool_choice="auto",  # Let the model decide when to call tools
@@ -225,7 +226,7 @@ _agent = ChatCompletionAgent(
     name="Policy-Assistant",
     instructions=instructions,
     plugins=[InternalFaqTool()],       # Tools the LLM is allowed to call
-    arguments=KernelArguments(settings),
+    arguments=KernelArguments(SETTINGS),
 )
 
 # --- Agent loop entry point ---
