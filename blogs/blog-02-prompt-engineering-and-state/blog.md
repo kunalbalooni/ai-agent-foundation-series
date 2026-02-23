@@ -1,38 +1,38 @@
 # Controlling Agent Behaviour — Prompt Engineering and State
 
-## Recap and what changes in this post
+## Recap and what this post adds
 
-In [post 1](../blog-01-from-llms-to-agents/blog.md) we built a minimal policy assistant. It could answer a single question, call a tool to retrieve a policy document, and return a grounded response. The core loop — plan, act, observe — was in place.
+In the [previous post](../blog-01-from-llms-to-agents/blog.md) we built the foundation: a minimal policy assistant that takes a question, calls a tool to retrieve a policy document, and returns a grounded response. We kept it deliberately simple — one tool, a readable prompt, a single-turn call — so the core loop (plan, act, observe) was visible without distraction.
 
-But there was a problem you would notice almost immediately in real use: ask the agent two questions in the same session and it forgets the first one. Change the system prompt slightly and the tone, scope, and format of answers shifts unpredictably. The agent was functional but not yet **controllable**.
+That foundation is solid. Now we add two layers that make it suitable for real, sustained use:
 
-This post fixes that. We will cover two things:
+1. **Prompt engineering** — restructuring the system prompt from a readable description into a precise control specification.
+2. **Explicit conversation state** — carrying the conversation history across turns so the agent reasons in context, not in isolation.
 
-1. **Prompt engineering** — treating the system prompt as a precise control mechanism, not a free-form description.
-2. **Explicit state** — persisting conversation history so the agent reasons across turns instead of answering each question in isolation.
-
-The code builds directly on the blog 1 example. The same FAQ tool, the same Azure OpenAI backend — but the agent will now handle multi-turn conversations predictably.
+The code builds directly on what we wrote before. The same FAQ tool, the same Azure OpenAI backend — two targeted upgrades, each with a clear purpose.
 
 ---
 
-## Why prompts are control mechanisms, not text generation
+## Prompts as control mechanisms
 
-The most common mistake when building agents is writing the system prompt like a chat message — a friendly paragraph describing what the agent "is". That works in demos, but it does not hold up when:
+The system prompt in the previous post was intentionally minimal: a clear description of the agent's purpose and a note about when to call the tool. That is exactly right as a starting point. As the agent moves toward real use, we need something more precise.
 
-- You need consistent output format (so downstream systems can parse responses).
-- You need the agent to stay inside a defined scope (so it does not hallucinate answers outside its knowledge).
-- You need to reproduce a failure and understand *why* the agent responded the way it did.
+The key shift in thinking: **the system prompt is not a description of the agent — it is the agent's behavioural specification**. Like a configuration file or a contract interface, it defines what the agent does and does not do, and callers depend on it being consistent.
 
-A better mental model: **the system prompt is code**. It specifies:
+A loosely written prompt leaves several decisions to the model on every call:
 
-- **Persona** — who the agent is and the tone it uses.
-- **Scope** — what it can and cannot answer.
-- **Behaviour rules** — how it handles uncertainty, when to call a tool, what format to use.
-- **Output contract** — the structure the caller can rely on.
+- Should it answer questions outside the listed topics?
+- Should it summarise or cite verbatim?
+- What should it say if the policy document does not cover the question?
+- Should it ask clarifying questions or make assumptions?
 
-When the prompt is structured this way, behaviour becomes predictable. Changing one section changes exactly one thing, and you can test that change in isolation — just like a code change.
+Because those decisions are implicit, the answers vary. The same question asked twice may produce different structures, different caveats, different lengths. A structured prompt eliminates that variation by making every decision explicit.
+
+> **Further reading:** Anthropic's [Prompt Engineering Overview](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/overview) covers the principles behind structured prompting in depth. The linked sub-pages on [system prompts](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/system-prompts-and-instructions) and [reducing hallucinations](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/reduce-hallucinations) are particularly relevant. OpenAI's [Prompt Engineering Guide](https://platform.openai.com/docs/guides/prompt-engineering) covers similar ground from the GPT side.
 
 ### The anatomy of a structured system prompt
+
+A reliable pattern is to divide the system prompt into named sections, each with a single responsibility:
 
 ```
 [PERSONA]
@@ -51,11 +51,9 @@ The structure and length constraints on answers.
 What to do when the answer is not known or not in scope.
 ```
 
-Below we will look at a concrete before-and-after comparison using our policy assistant.
+Each section is independently testable. Change the response format without touching the tool usage rules. Narrow the scope without changing the persona. The prompt becomes maintainable in the same way code is.
 
----
-
-## Before: a vague prompt
+### The starting prompt (from the previous post)
 
 ```python
 instructions = """
@@ -68,200 +66,11 @@ You can answer questions about:
 """
 ```
 
-This works for demos. In practice, it leaves several decisions to the model on every call:
+Clear and readable — a good starting point. What it leaves open: out-of-scope behaviour, output format, what to do when the policy doesn't cover the question, and how to handle ambiguity. Each of those gaps produces variation in answers.
 
-- Should it answer questions outside the listed topics?
-- Should it summarise or cite verbatim?
-- What should it say if the policy document does not cover the question?
-- Should it ask clarifying questions or make assumptions?
-
-Because those decisions are implicit, the answers vary. The same question asked twice may produce different structures, different caveats, different lengths.
-
----
-
-## After: a structured prompt
+### The structured version
 
 ```python
-instructions = """
-## PERSONA
-You are the internal policy assistant for an engineering team.
-You are precise, concise, and cite the specific policy that informs your answer.
-You do not use filler phrases like "Great question!" or "Certainly!".
-
-## SCOPE
-You answer questions on these topics only:
-- Release freeze: timing, allowed changes, exceptions, approvals, rollback.
-- SEV1 incidents: definition, roles, timelines, escalation, post-incident requirements.
-
-If a question is outside this scope, respond exactly:
-  "I can only answer questions about release freeze and SEV1 incidents."
-
-## TOOL USAGE RULES
-- Always call lookup_faq before answering a policy question.
-- Call it with the key "release-freeze" for release freeze questions.
-- Call it with the key "incident-sev1" for SEV1 questions.
-- Do not answer from memory; use only what the tool returns.
-
-## RESPONSE FORMAT
-- Answer in plain prose, 3–5 sentences maximum.
-- If the answer involves a list of steps or roles, use a numbered or bulleted list.
-- End every answer with: "Source: <policy key used>"
-
-## BEHAVIOUR UNDER UNCERTAINTY
-- If the tool returns no content for a key, respond: "Policy not found. Please check with your Release Manager."
-- If the user's question is ambiguous, ask one clarifying question before calling the tool.
-"""
-```
-
-Now every section controls exactly one behaviour. You can change the response format without touching the tool usage rules. You can narrow the scope without changing the persona. Each section is independently testable.
-
----
-
-## Why state matters
-
-The blog 1 agent was **stateless**: each call to `ask_agent()` was a fresh conversation. The agent had no memory of what the user asked a moment ago.
-
-This is a problem for any realistic workflow. A real policy conversation might go:
-
-```
-User:  When does the release freeze start?
-Agent: The freeze begins 48 hours before the release window.
-
-User:  And what changes are allowed during that period?
-Agent: [Needs to know we are still talking about the release freeze]
-
-User:  Who approves exceptions?
-Agent: [Needs to know the context of "exceptions" from the previous turn]
-```
-
-Without state, the second and third questions arrive at the LLM without context. The model has to guess what "that period" refers to. It may guess correctly most of the time — but correctness by inference is not the same as correctness by design.
-
-**Explicit state** solves this by passing the full conversation history to the LLM on every turn, so each new question is answered in the context of everything that came before.
-
----
-
-## How conversation state works in Semantic Kernel
-
-Semantic Kernel provides a `ChatHistory` object that accumulates messages across turns. Instead of calling `get_response(messages=question)` with a bare string, we pass the whole history and append each new exchange to it.
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Agent
-    participant ChatHistory
-    participant LLM
-    participant Tool
-
-    User->>Agent: Question 1
-    Agent->>ChatHistory: Append user message
-    Agent->>LLM: Send full history
-    LLM->>Tool: lookup_faq("release-freeze")
-    Tool-->>LLM: Policy content
-    LLM-->>Agent: Answer 1
-    Agent->>ChatHistory: Append assistant message
-    Agent-->>User: Answer 1
-
-    User->>Agent: Question 2 (follow-up)
-    Agent->>ChatHistory: Append user message
-    Agent->>LLM: Send full history (Q1 + A1 + Q2)
-    LLM-->>Agent: Answer 2 (in context of Q1)
-    Agent->>ChatHistory: Append assistant message
-    Agent-->>User: Answer 2
-```
-
-The `ChatHistory` object is the agent's **working memory** for the session. It is simple, inspectable, and deterministic — you can print it at any point to understand exactly what the LLM sees.
-
----
-
-## State vs memory — a useful distinction
-
-State and memory are often used interchangeably, but it helps to distinguish them:
-
-| | **State (this post)** | **Memory (future posts)** |
-|---|---|---|
-| **Scope** | Within a single session | Across sessions |
-| **Storage** | In-process (`ChatHistory`) | External (vector store, database) |
-| **Typical use** | Multi-turn conversation context | Remembering user preferences, past incidents |
-| **Complexity** | Low | Medium–high |
-
-This post covers in-session state. Cross-session memory (with retrieval) is the topic of post 3.
-
----
-
-## What predictable and debuggable means in practice
-
-With a structured prompt and explicit state, you gain two properties that matter for production:
-
-**Predictable:** Given the same conversation history and the same policy documents, the agent produces the same category of response. The format, scope, and citation pattern are consistent. Downstream systems (dashboards, notifications, logs) can parse the output reliably.
-
-**Debuggable:** When the agent gives a wrong or unexpected answer, you can inspect exactly what it received: the system prompt, the conversation history, and the tool output. There is no hidden state. The failure is reproducible because the input is fully known.
-
-```mermaid
-flowchart LR
-    SP[Structured system prompt] --> Predictable[Predictable output format and scope]
-    CH[Chat history as explicit state] --> Debuggable[Reproducible, inspectable failures]
-    Predictable --> Reliable[Reliable agent behaviour]
-    Debuggable --> Reliable
-```
-
----
-
-## Updated agent (SK + Azure OpenAI)
-
-The changes from blog 1 are:
-
-1. The system prompt is replaced with the structured version above.
-2. A `ChatHistory` object is created per session and passed to `invoke()` instead of `get_response()`.
-3. The API now accepts an optional `session_id` so each user gets their own history.
-4. The Streamlit UI becomes a proper multi-turn chat interface.
-
-### Full example
-
-**agent.py**
-
-```python
-import os
-import asyncio
-from pathlib import Path
-from typing import Optional
-
-from semantic_kernel.agents import ChatCompletionAgent
-from semantic_kernel.connectors.ai.open_ai import AzureChatCompletion, OpenAIChatPromptExecutionSettings
-from semantic_kernel.contents import ChatHistory
-from semantic_kernel.functions import kernel_function, KernelArguments
-
-# --- Configuration ---
-from dotenv import load_dotenv
-load_dotenv()
-
-AZURE_OPENAI_ENDPOINT = os.environ["AZURE_OPENAI_ENDPOINT"]
-AZURE_OPENAI_KEY = os.environ["AZURE_OPENAI_API_KEY"]
-AZURE_OPENAI_DEPLOYMENT = os.environ["AZURE_OPENAI_DEPLOYMENT"]
-
-FAQ_DIR = Path("../data/faq_docs")
-
-def load_faq_docs() -> dict[str, str]:
-    """Load each .txt file into a {key: content} dictionary."""
-    docs = {}
-    for path in FAQ_DIR.glob("*.txt"):
-        docs[path.stem] = path.read_text(encoding="utf-8").strip()
-    return docs
-
-FAQ = load_faq_docs()  # Loaded once at startup
-
-# --- Tool definition ---
-class InternalFaqTool:
-    @kernel_function(
-        name="lookup_faq",
-        description="Lookup an internal policy document by key. "
-                    "Valid keys: 'release-freeze', 'incident-sev1'.",
-    )
-    def lookup_faq(self, key: str) -> str:
-        return FAQ.get(key, "Policy not found. Please check with your Release Manager.")
-
-# --- Structured system prompt ---
-# Each section controls exactly one behaviour.
-# Change one section without touching the others to isolate the effect.
 INSTRUCTIONS = """
 ## PERSONA
 You are the internal policy assistant for an engineering team.
@@ -291,30 +100,178 @@ If a question is outside this scope, respond exactly:
 - If the tool returns no content for a key, respond: "Policy not found. Please check with your Release Manager."
 - If the user's question is ambiguous, ask one clarifying question before calling the tool.
 """
+```
 
-# --- LLM parameters ---
-SETTINGS = OpenAIChatPromptExecutionSettings(
-    temperature=0.1,  # Very low: we want highly consistent, factual responses
-    max_tokens=600,
-    tool_choice="auto",
-)
+Every gap is now closed. The format, scope boundary, fallback behaviour, and citation pattern are all specified. Callers — whether human or automated — can rely on a consistent structure.
 
-# --- Agent assembly ---
+---
+
+## Explicit conversation state
+
+The previous post's `ask_agent()` made a single-turn call:
+
+```python
+response = await _agent.get_response(messages=question)
+```
+
+Passing a bare string to `get_response()` creates a fresh, one-message conversation each time. The SK framework has no opportunity to accumulate history — there is nothing to accumulate. Each call is independent by design.
+
+This is the right approach for a single-question agent. For multi-turn use it produces a familiar problem: the agent answers each question in isolation, with no knowledge of what came before.
+
+```
+User:  When does the release freeze start?
+Agent: The freeze begins 48 hours before the release window.
+
+User:  And what changes are allowed during that period?
+Agent: [No context — "that period" is unresolved]
+
+User:  Who approves exceptions?
+Agent: [No context — "exceptions" to what is unresolved]
+```
+
+The model may infer the right context from wording alone, but inference-based correctness is not the same as design-based correctness. Explicit state removes the ambiguity entirely.
+
+**Explicit state** means passing the full conversation history to the LLM on every turn, so each new question is answered in the context of everything that came before.
+
+### How `ChatHistory` works in Semantic Kernel
+
+Semantic Kernel provides a `ChatHistory` object that accumulates messages across turns. We create one per session, append each exchange to it, and pass the whole object to `invoke()` instead of the bare string.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Agent
+    participant ChatHistory
+    participant LLM
+    participant Tool
+
+    User->>Agent: Question 1
+    Agent->>ChatHistory: Append user message
+    Agent->>LLM: Send full history
+    LLM->>Tool: lookup_faq("release-freeze")
+    Tool-->>LLM: Policy content
+    LLM-->>Agent: Answer 1
+    Agent->>ChatHistory: Append assistant message
+    Agent-->>User: Answer 1
+
+    User->>Agent: Question 2 (follow-up)
+    Agent->>ChatHistory: Append user message
+    Agent->>LLM: Send full history (Q1 + A1 + Q2)
+    LLM-->>Agent: Answer 2 (in context of Q1)
+    Agent->>ChatHistory: Append assistant message
+    Agent-->>User: Answer 2
+```
+
+The `ChatHistory` object is the agent's working memory for the session. It is simple, inspectable, and deterministic — print it at any point to see exactly what the LLM received.
+
+---
+
+## State vs memory — a useful distinction
+
+State and memory are related but different:
+
+| | **State (this post)** | **Memory (covered in upcoming posts)** |
+|---|---|---|
+| **Scope** | Within a single session | Across sessions |
+| **Storage** | In-process (`ChatHistory`) | External (vector store, database) |
+| **Typical use** | Multi-turn conversation context | Remembering past incidents, user context |
+| **Complexity** | Low | Medium–high |
+
+This post covers in-session state. Cross-session memory — retrieving relevant history from a store — is covered in upcoming posts in the series.
+
+---
+
+## What predictable and debuggable means in practice
+
+With a structured prompt and explicit state, two properties follow that matter for production:
+
+**Predictable:** Given the same conversation history and the same policy documents, the agent produces the same category of response. The format, scope, and citation pattern are consistent. Downstream systems can parse the output reliably.
+
+**Debuggable:** When the agent gives a wrong or unexpected answer, you can inspect exactly what it received: the system prompt, the full conversation history, and the tool output. There is no hidden state. The failure is reproducible because the input is fully known.
+
+```mermaid
+flowchart LR
+    SP[Structured system prompt] --> Predictable[Predictable output format and scope]
+    CH[Chat history as explicit state] --> Debuggable[Reproducible, inspectable failures]
+    Predictable --> Reliable[Reliable agent behaviour]
+    Debuggable --> Reliable
+```
+
+---
+
+## What changes in the code
+
+The code directory for this post contains the complete updated files. The changes from the previous post are targeted:
+
+| File | What changes |
+|---|---|
+| `agent.py` | `instructions` → structured `INSTRUCTIONS`; `get_response(str)` → `invoke(ChatHistory)`; session store added; `reset_session()` added |
+| `api.py` | `Query` gains `session_id` field; `/reset` endpoint added |
+| `streamlit.py` | Single `st.text_input` → multi-turn `st.chat_input` with full chat history display and a reset button |
+
+Here are the diffs for each file. If you are following along, apply these changes to your existing code from the previous post.
+
+---
+
+### `agent.py` — key changes
+
+**1. Add `ChatHistory` import**
+
+```python
+# Add this import alongside the existing ones
+from semantic_kernel.contents import ChatHistory
+```
+
+**2. Replace the system prompt**
+
+```python
+# Before
+instructions = """
+You are a helpful internal knowledge assistant.
+If you need a policy, call the lookup_faq tool.
+...
+"""
+
+# After — structured INSTRUCTIONS constant (see full version in code/agent.py)
+INSTRUCTIONS = """
+## PERSONA
+...
+## SCOPE
+...
+## TOOL USAGE RULES
+...
+## RESPONSE FORMAT
+...
+## BEHAVIOUR UNDER UNCERTAINTY
+...
+"""
+```
+
+**3. Update the agent assembly to use `INSTRUCTIONS`**
+
+```python
+# Before
 _agent = ChatCompletionAgent(
-    service=AzureChatCompletion(       # LLM: connects to Azure OpenAI
-        deployment_name=AZURE_OPENAI_DEPLOYMENT,
-        endpoint=AZURE_OPENAI_ENDPOINT,
-        api_key=AZURE_OPENAI_KEY,
-    ),
-    name="Policy-Assistant",
-    instructions=INSTRUCTIONS,
-    plugins=[InternalFaqTool()],
-    arguments=KernelArguments(SETTINGS),
+    ...
+    instructions=instructions,
+    ...
 )
 
-# --- In-process session store ---
-# Maps session_id -> ChatHistory.
-# In production this would be an external store (Redis, database, etc.).
+# After
+_agent = ChatCompletionAgent(
+    ...
+    instructions=INSTRUCTIONS,
+    ...
+)
+```
+
+**4. Add per-session `ChatHistory` store**
+
+```python
+# Add below the agent assembly
+
+# Maps session_id -> ChatHistory so each user keeps their own conversation context.
+# In production, replace this dict with an external store (Redis, database, etc.)
 _sessions: dict[str, ChatHistory] = {}
 
 def get_or_create_history(session_id: str) -> ChatHistory:
@@ -323,31 +280,50 @@ def get_or_create_history(session_id: str) -> ChatHistory:
         _sessions[session_id] = ChatHistory()
     return _sessions[session_id]
 
-# --- Agent loop entry point (stateful) ---
-# The full ChatHistory is passed to invoke() on every call so the LLM
-# sees the complete conversation context, not just the latest question.
-async def ask_agent(question: str, session_id: str = "default") -> str:
-    history = get_or_create_history(session_id)
-    history.add_user_message(question)   # Append the new question to history
-
-    response_text = ""
-    # invoke() runs the plan -> act -> observe loop and streams response chunks
-    async for chunk in _agent.invoke(history):
-        response_text += str(chunk.content)
-
-    history.add_assistant_message(response_text)  # Persist the answer in history
-    return response_text
-
 def reset_session(session_id: str = "default") -> None:
     """Clear the conversation history for a session."""
     _sessions.pop(session_id, None)
+```
 
+**5. Replace `ask_agent()` — stateless → stateful**
+
+```python
+# Before — single-turn, no history
+async def ask_agent(question: str) -> str:
+    response = await _agent.get_response(messages=question)
+    return response.content
+
+# After — full history passed on every call
+async def ask_agent(question: str, session_id: str = "default") -> str:
+    history = get_or_create_history(session_id)
+    history.add_user_message(question)        # Append new question to history
+
+    response_text = ""
+    # invoke() runs the plan -> act -> observe loop with the full history
+    async for chunk in _agent.invoke(history):
+        response_text += str(chunk.content)
+
+    history.add_assistant_message(response_text)  # Persist the answer
+    return response_text
+```
+
+**6. Replace `main()` with an interactive multi-turn loop**
+
+```python
+# Before — single question, then exit
 async def main() -> None:
-    """Interactive CLI loop — type 'reset' to clear history, 'quit' to exit."""
+    user_question = input("Ask a policy question: ").strip()
+    answer = await ask_agent(user_question)
+    print(answer)
+
+# After — loop with history reset support
+async def main() -> None:
     session_id = "cli-session"
     print("Policy Assistant (type 'reset' to clear history, 'quit' to exit)\n")
     while True:
         user_input = input("You: ").strip()
+        if not user_input:
+            continue
         if user_input.lower() == "quit":
             break
         if user_input.lower() == "reset":
@@ -356,41 +332,40 @@ async def main() -> None:
             continue
         answer = await ask_agent(user_input, session_id=session_id)
         print(f"Agent: {answer}\n")
-
-if __name__ == "__main__":
-    asyncio.run(main())
 ```
 
 ---
 
-**api.py**
+### `api.py` — key changes
+
+**1. Add `session_id` to the request schema and a `/reset` endpoint**
 
 ```python
-from fastapi import FastAPI
-from pydantic import BaseModel
-
-from agent import ask_agent, reset_session  # Stateful agent with session support
-
-app = FastAPI()
-
-# --- Request/response schemas ---
+# Before
 class Query(BaseModel):
     question: str
-    session_id: str = "default"  # Each client passes its own session ID for isolated history
+
+@app.post("/ask")
+async def ask(query: Query):
+    answer = await ask_agent(query.question)
+    return {"answer": answer}
+
+# After
+from agent import ask_agent, reset_session   # import reset_session too
+
+class Query(BaseModel):
+    question: str
+    session_id: str = "default"   # Each client passes its own session ID
 
 class ResetRequest(BaseModel):
     session_id: str = "default"
 
-# POST /ask — routes the question + session_id to the stateful agent.
-# The agent appends to (or starts) the ChatHistory for that session_id,
-# so follow-up questions retain context from earlier in the conversation.
 @app.post("/ask")
 async def ask(query: Query):
     answer = await ask_agent(query.question, session_id=query.session_id)
     return {"answer": answer, "session_id": query.session_id}
 
-# POST /reset — clears the conversation history for a session.
-# Call this when the user starts a new topic or explicitly resets the chat.
+# New endpoint — clears the ChatHistory for a session
 @app.post("/reset")
 async def reset(req: ResetRequest):
     reset_session(req.session_id)
@@ -399,7 +374,9 @@ async def reset(req: ResetRequest):
 
 ---
 
-**streamlit.py**
+### `streamlit.py` — full replacement
+
+The UI changes more substantially — from a single text input to a proper chat interface — so a full replacement is cleaner than a diff:
 
 ```python
 import uuid
@@ -415,72 +392,51 @@ st.caption("Multi-turn — ask follow-up questions and the agent remembers the c
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
 
-# Store the displayed conversation locally so we can render the full chat history.
+# Local message list mirrors what is displayed in the chat window.
+# The authoritative conversation history lives server-side in ChatHistory.
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Render all previous messages
+# Render the full conversation so far
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
 
-# Chat input — Streamlit re-runs on each submission
+# st.chat_input renders a persistent input box at the bottom of the page.
 question = st.chat_input("Ask a policy question...")
 
 if question:
-    # Show the user's message immediately
     st.session_state.messages.append({"role": "user", "content": question})
     with st.chat_message("user"):
         st.write(question)
 
-    # Send to backend — include session_id so the agent uses the right history
+    # Send to backend — session_id ensures the agent uses the right history
     response = requests.post(
         f"{API_URL}/ask",
         json={"question": question, "session_id": st.session_state.session_id},
     )
-    if response.ok:
-        answer = response.json()["answer"]
-    else:
-        answer = "Request failed. Is the API server running?"
+    answer = response.json()["answer"] if response.ok else "Request failed. Is the API server running?"
 
-    # Show the agent's response and persist it
     st.session_state.messages.append({"role": "assistant", "content": answer})
     with st.chat_message("assistant"):
         st.write(answer)
 
-# Sidebar: reset button clears both the local display and the server-side history
+# Sidebar: reset clears both the local display and the server-side ChatHistory
 with st.sidebar:
     st.header("Session")
     st.write(f"Session ID: `{st.session_state.session_id[:8]}...`")
     if st.button("Reset conversation"):
-        requests.post(
-            f"{API_URL}/reset",
-            json={"session_id": st.session_state.session_id},
-        )
+        requests.post(f"{API_URL}/reset", json={"session_id": st.session_state.session_id})
         st.session_state.messages = []
         st.rerun()
 ```
 
 ---
 
-## What changed and why
-
-| | Blog 1 | Blog 2 |
-|---|---|---|
-| **System prompt** | Unstructured paragraph | Structured sections (persona, scope, rules, format) |
-| **Agent call** | `get_response(messages=question)` — stateless | `invoke(history)` — full conversation history |
-| **Session state** | None | `ChatHistory` per `session_id` |
-| **API** | `/ask` with bare question | `/ask` with `session_id`; `/reset` endpoint added |
-| **UI** | Single text input | Multi-turn chat with session reset |
-
-The agent is now **controllable** (the prompt defines exactly what it does) and **stateful** (it reasons across turns). It still uses the same FAQ tool and the same Azure OpenAI backend as blog 1 — the architecture did not change, only the quality of the control and memory layers.
-
----
-
 ## Example run
 
 ```bash
-# 1) Create and activate a virtual environment (if not already done)
+# 1) Set up the virtual environment (skip if already done from the previous post)
 python -m venv .venv
 .venv\Scripts\activate          # Windows
 # source .venv/bin/activate     # macOS / Linux
@@ -488,19 +444,20 @@ python -m venv .venv
 # 2) Install dependencies
 pip install -r requirements.txt
 
-# 3) Set up credentials (copy the template and fill in your values)
-cp .env.template .env
+# 3) Set up credentials
+cp .env.template .env           # Then fill in your Azure OpenAI values
 
-# 4) Run the agent interactively in the CLI (demonstrates multi-turn state)
+# 4) Run the agent in the CLI — try a multi-turn conversation
 python agent.py
 # Try: "When does the release freeze start?"
 # Then: "What changes are allowed during that period?"
 # Then: "Who approves exceptions?"
+# Then type 'reset' and ask again — notice the agent loses the prior context
 
 # 5) Start the API server
 uvicorn api:app --reload
 
-# 6) Test a multi-turn conversation via the API
+# 6) Test multi-turn via the API (same session_id links the turns)
 curl -X POST http://127.0.0.1:8000/ask \
   -H "Content-Type: application/json" \
   -d "{\"question\": \"When does the release freeze start?\", \"session_id\": \"test-session\"}"
@@ -517,18 +474,26 @@ streamlit run streamlit.py
 
 ## Observing prompt impact — a quick experiment
 
-The fastest way to build intuition about prompt engineering is to change one section at a time and observe the effect:
+The fastest way to build intuition is to change one section of the prompt at a time and observe the effect:
 
-1. **Remove the SCOPE section** — ask a question outside the policy domain and watch the agent answer anyway.
+1. **Remove the SCOPE section** — ask a question outside the policy domain and watch the agent answer it.
 2. **Remove the RESPONSE FORMAT section** — answers become inconsistent in length and structure.
-3. **Change `temperature` from `0.1` to `0.8`** — the same question now produces noticeably different answers on repeated runs.
+3. **Change `temperature` from `0.1` to `0.8`** — the same question produces noticeably different answers on repeated runs.
 4. **Print the `ChatHistory` object after two turns** — see exactly what the LLM received as context.
 
-Each of these experiments takes less than a minute and builds a much clearer mental model than reading documentation.
+Each experiment takes less than a minute and builds a clearer mental model than reading documentation.
 
 ---
 
-**What's next:** post 3 adds **retrieval-augmented generation (RAG)** — loading knowledge from a real document corpus rather than a small FAQ dictionary, so the agent can answer questions across a much larger knowledge base without stuffing everything into the context window.
+## Further reading
+
+- **[Anthropic Prompt Engineering Overview](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/overview)** — a thorough guide to structuring prompts for consistent, controllable behaviour. The sub-pages on [system prompts](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/system-prompts-and-instructions) and [reducing hallucinations](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/reduce-hallucinations) are directly applicable here.
+- **[OpenAI Prompt Engineering Guide](https://platform.openai.com/docs/guides/prompt-engineering)** — covers the same principles from the GPT side, including use of delimiters, structured output, and chain-of-thought.
+- **[Semantic Kernel — Prompt Templates](https://learn.microsoft.com/en-us/semantic-kernel/prompts/)** — SK-specific documentation on how prompts are compiled, parameterised, and rendered before being sent to the LLM.
+
+---
+
+**What's next:** An upcoming post in this series adds **retrieval-augmented generation (RAG)** — loading knowledge from a real document corpus so the agent can answer questions across a much larger knowledge base without stuffing everything into the context window.
 
 ### Closing note
-The two concepts in this post — structured prompts and explicit state — are the foundation of every reliable agent you will build. RAG, tools, multi-agent coordination all sit on top of them. Invest time here and the rest of the series will feel systematic rather than magical.
+Structured prompts and explicit conversation state are the foundation that everything else in this series builds on. RAG, tool orchestration, and multi-agent coordination all depend on an agent that behaves predictably and can be debugged when it does not. Invest time in these two layers and the rest of the series will feel systematic rather than magical.
