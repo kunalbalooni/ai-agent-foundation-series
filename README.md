@@ -17,7 +17,7 @@ Create a practical, code‑first series that explains not just **how** to build 
 1. **[From LLMs to AI Agents — Why a Prompt Is Not Enough](blogs/blog-01-from-llms-to-agents/blog.md)**
    Explains how LLMs differ from agents (state, tools, control loops), surveys agent frameworks, and implements the first minimal agent using Semantic Kernel as a concrete example.
 
-2. **Controlling Agent Behaviour — Prompt Engineering and State**
+2. **[Controlling Agent Behaviour — Prompt Engineering and State](blogs/blog-02-prompt-engineering-and-state/blog.md)**
    Introduces prompts as control mechanisms (not text generation) and shows how explicit agent state enables predictable, debuggable behaviour.
 
 3. **Teaching the Agent to Use Knowledge — Retrieval‑Augmented Generation (RAG)**
