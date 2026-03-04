@@ -8,4 +8,5 @@ __pycache__/
 .DS_Store
 .vscode/
 *.sqlite
-*.dbblog-writing-instructions.md
+*.db
+blog-writing-instructions.md
