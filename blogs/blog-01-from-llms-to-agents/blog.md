@@ -1,37 +1,54 @@
 # From LLMs to AI Agents — Why a Prompt Is Not Enough
 
 ## Intro
-You have probably used tools like **[ChatGPT](https://chat.openai.com/)**, **[Grok](https://x.ai/)**, or **[DeepSeek](https://www.deepseek.com/)**. They are great for everyday work: summarizing documents, explaining logs, writing SQL, generating Python snippets, troubleshooting errors, or drafting emails and reports. If you are like most people, you have also noticed the model gets better when you **paste in more context**: more tables, more logs, more documentation, more examples.
+You have probably used AI assistants like **[ChatGPT](https://chat.openai.com/)**, **[Grok](https://x.ai/)**, or **[DeepSeek](https://www.deepseek.com/)**. They are great for everyday work: summarizing documents, explaining logs, writing SQL, generating Python snippets, troubleshooting errors, or drafting emails and reports. Under the hood, these assistants are powered by **Large Language Models (LLMs)** — models trained on vast amounts of text to understand and generate language. If you are like most people, you have also noticed the assistant gets better when you **paste in more context**: more tables, more logs, more documentation, more examples.
 
-Large Language Models (LLMs) are powerful, but a prompt alone is not enough for real systems. A helpful assistant must **retrieve the right context** (for example, the latest policy page instead of whatever you pasted last week), **take actions through tools** (like querying a database or calling an API), and **keep state** (remembering earlier steps in a workflow or a multi‑turn investigation). That is what AI agents add on top of LLMs.
+That ceiling — the point where pasting more context stops being enough — is where a plain LLM falls short and an agent takes over. To be truly useful in a business context, an assistant must **retrieve the right context** automatically (for example, fetching the latest policy page rather than relying on whatever you pasted last week), **take actions through tools** (like querying a database or calling an API), and **keep state** (remembering earlier steps in a workflow or a multi‑turn investigation). That is what AI agents add on top of LLMs.
 
 In this post, we will build a small **internal policy assistant** that answers release‑freeze and incident questions, and use it as the running example for the series.
 
 ---
 
 ## LLM vs Agent
-Think of an LLM as a **very capable text engine**. You can ask it a question and it responds well. But if you ask it to *act*—look up a policy, query a database, call an API, or remember what happened earlier—it falls short. It is brilliant at language, but it does not carry a workflow on its own.
 
-An agent is designed to carry that workflow. It **builds on an LLM** by wrapping it in the pieces that make it actionable and repeatable.
+### Where LLMs are genuinely useful
 
-On its own, an LLM **does not**:
+For many everyday business tasks, a well-prompted LLM is all you need. In these cases *you* are the one doing the retrieval (you paste the content in) and *you* are the one taking action (you run the SQL, you send the email). The LLM handles only the language part:
 
-- Know your private data by default
-- Persist memory across runs
-- Execute actions (APIs, tools, databases)
-- Maintain long-running state or goals
+| Business task | What the LLM does |
+|---|---|
+| Draft a post-incident summary | Reads the log you paste, writes a clear narrative |
+| Generate SQL from natural language | Turns "show me last month's top customers" into a working query |
+| Explain a cryptic error message | Reads the stack trace and describes the likely cause |
+| Write a release note | Takes a list of changes and produces a professional summary |
+| Summarise a long policy document | Condenses 20 pages into 5 bullets |
 
-So if you want an assistant that answers internal questions and triggers workflows, you need more than a prompt. You need an **agent system**.
+### Where LLMs fall short — and need an agent
+
+The moment the *retrieval*, *action*, or *memory* must happen **automatically and repeatedly**, a standalone LLM breaks down:
+
+| Business need | Why the LLM alone fails |
+|---|---|
+| "Answer questions about our *current* release freeze policy" | The LLM was trained months ago. It cannot fetch the live policy document. |
+| "Alert me if this log pattern appears again within an hour" | The LLM has no memory between calls. Each prompt starts from zero. |
+| "Raise a PagerDuty ticket if the on-call engineer hasn't acknowledged the SEV1" | The LLM cannot call external APIs or take actions in other systems. |
+| "Walk an engineer through an incident response *step by step*, checking each step is complete before moving on" | The LLM cannot maintain workflow state across multiple turns reliably. |
+
+In each case, the language capability of the LLM is still exactly what you want — you just need to give it **hands** (tools to call), **memory** (state that persists), and a **driver** (a loop that keeps it on task). That is where an agent comes in.
 
 ---
 
-An agent is a **goal‑driven system** that wraps an LLM with three critical capabilities:
+## What Makes an Agent
 
-1. **Tools** — the ability to call APIs or functions
-2. **State** — memory and context across steps
-3. **Control loop** — a repeatable plan/act/observe cycle
+An agent does not replace the LLM — it **builds around it**. The LLM stays at the centre, doing what it does best (reasoning and language). The agent framework layers on three capabilities the LLM is missing on its own:
 
-State is what lets the agent remember you already asked for the SEV1 policy, so it does not re‑fetch it every turn.
+- **Tools** — the ability to call APIs or functions (so it can *act*)
+- **State** — memory and context across steps (so it can *remember*)
+- **Control loop** — a repeatable plan/act/observe cycle (so it can *drive a workflow*)
+
+### The building blocks
+
+The architecture diagram below shows the relationship: the LLM is the reasoning core, surrounded by tools, state, and the control loop that orchestrates everything.
 
 ```mermaid
 flowchart TB
@@ -55,18 +72,15 @@ flowchart TB
   State --> Context[Conversation + Workflow Context]
 ```
 
-That is why agent code has a few extra moving parts compared to a plain LLM call.
+State is what lets the agent remember you already asked for the SEV1 policy, so it does not re‑fetch it every turn. Tools are what let it actually look that policy up from your internal system, rather than guessing.
 
----
+### The control loop at runtime
 
-## Agent Loop
-Here is the simple loop most agents follow:
+Those building blocks only become useful when the agent is actually running. At runtime, the agent follows a tight loop:
 
-1. **Plan** what to do next
-2. **Act** by calling a tool or generating a response
-3. **Observe** the result and update state
-
-Here is the minimal loop that guides the code we will write:
+1. **Plan** — the LLM reasons about what to do next given the current state
+2. **Act** — it either calls a tool or returns a direct response
+3. **Observe** — the result is fed back into state and the loop repeats if needed
 
 ```mermaid
 flowchart TD
@@ -78,23 +92,15 @@ flowchart TD
     F --> B
 ```
 
-This loop is the reason you see tool definitions, an execution kernel, and a memory or state store in agent code.
-
----
-
-## Why Each Code Step Exists
-When you build your first agent, three pieces of code show up again and again. Each has a clear purpose:
-
-1. **Model configuration** — to give the agent a brain (LLM)
-2. **Tool registration** — to let it do something beyond text
-3. **Execution call** — to run the loop and get a grounded answer
-
-We will keep the tools minimal and focus on the reasoning behind each step.
+This loop is the reason agent code looks different from a plain LLM call: you need a tool registry, an execution kernel, and a state store — one for each phase of the loop.
 
 ---
 
 ## Frameworks and SDKs (and how to compare them)
-Before jumping into code, it helps to scan the **agent frameworks and SDKs** you will see in the wild. A simple way to choose is to compare them on a few **practical metrics**.
+
+Understanding the loop and the building blocks is the conceptual foundation. Before writing any code, you need to pick the right framework to implement it — because your choice shapes how easy the loop is to build, inspect, and run in production.
+
+A simple way to choose is to compare frameworks on a few **practical metrics**.
 
 ### Key metrics to compare
 1. **Language support** — Does it match your stack (Python, C#, JS, etc.)?
@@ -105,34 +111,35 @@ Before jumping into code, it helps to scan the **agent frameworks and SDKs** you
 6. **Learning curve** — How fast a beginner can ship something useful.
 
 ### Quick comparison (high-level)
-| Framework / SDK | Best for | Strengths | Trade-offs | Recommendation |
-|---|---|---|---|---|
-| **[Semantic Kernel](https://github.com/microsoft/semantic-kernel)** | Enterprise agents, structured tools | Strong .NET and Python support, tool-first design, integrates well with Azure | Smaller ecosystem than LangChain, fewer community examples | **Best for Azure / .NET enterprise teams** |
-| **[LangChain](https://www.langchain.com/)** | Rapid prototyping, broad ecosystem | Large community, many integrations, lots of examples | Can feel abstract, harder to debug complex chains | **Best for beginners & rapid prototyping** |
-| **[LlamaIndex](https://www.llamaindex.ai/)** | Data-centric applications | Excellent retrieval/RAG tooling | Not a full agent framework by itself | **Best for RAG & data-heavy applications** |
-| **[AutoGen](https://github.com/microsoft/autogen)** | Multi-agent research | Strong multi-agent patterns, active research | More experimental for production | **Best for multi-agent research & experimentation** |
-| **[CrewAI](https://www.crewai.com/)** | Role-based agent teams | Simple multi-agent design patterns | Limited enterprise features | **Best for quick role-based agent prototypes** |
-| **[n8n](https://n8n.io/)** | Low-code workflows | Visual orchestration, great for non-devs, fast automation | Less flexible for custom agent logic, not code-first | **Best for non-developers & low-code automation** |
-| **[AWS Strands](https://aws.amazon.com/)** | AWS-native agent stacks | Tight AWS integrations, enterprise deployment patterns | AWS-leaning, smaller community outside AWS | **Best for AWS-native production stacks** |
-| **[Copilot Studio](https://www.microsoft.com/microsoft-copilot/microsoft-copilot-studio)** | Business users, M365 ecosystem | Easy UI, Microsoft ecosystem integration | Less control for custom architectures, platform constraints | **Best for M365 business users, no coding needed** |
-| **[Azure AI Studio](https://ai.azure.com/)** | Azure-native build & deploy | Unified model catalog, evaluation and deployment | Azure-centric workflows | **Best for Azure-native build & deployment pipelines** |
+
+| Framework / SDK | Best for | Lang Support | Tooling & Integrations | Orchestration | Control & Transparency | Production Readiness | Learning Curve | Strengths | Trade-offs | Recommendation |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **[Semantic Kernel](https://github.com/microsoft/semantic-kernel)** | Enterprise agents, structured tools | Python, .NET | ✓ Azure, OpenAI, Hugging Face | ✓ Planners, multi-step | ✓ Structured logging | ✓✓ Azure-native | Medium | Tool-first design, strong Azure integration | Smaller community than LangChain | **Best for Azure / .NET enterprise teams** |
+| **[LangChain](https://www.langchain.com/)** | Rapid prototyping, broad ecosystem | Python, JS/TS | ✓✓ 100+ integrations | ✓ Chains, agents, memory | ✓ LangSmith tracing | ✓ Broad deployment | Low | Largest community, most examples | Can feel abstract, harder to debug | **Best for beginners & rapid prototyping** |
+| **[LlamaIndex](https://www.llamaindex.ai/)** | Data-centric applications | Python, JS/TS | ✓ Data/retrieval focused | ✗ Limited agent orchestration | ✓ Query pipelines | ✓ Pairs with other frameworks | Low | Best-in-class RAG tooling | Not a full agent framework | **Best for RAG & data-heavy applications** |
+| **[AutoGen](https://github.com/microsoft/autogen)** | Multi-agent research | Python | ✓ OpenAI, Azure | ✓✓ Multi-agent coordination | ✓ Conversation traces | ✗ Experimental for production | High | Strong multi-agent patterns, active research | Production-readiness gaps | **Best for multi-agent research & experimentation** |
+| **[CrewAI](https://www.crewai.com/)** | Role-based agent teams | Python | ✓ OpenAI, Anthropic, local | ✓ Role-based multi-agent | ✓ Basic | ✗ Limited enterprise features | Low | Simple role-based design, minimal boilerplate | Limited scaling & enterprise controls | **Best for quick role-based agent prototypes** |
+| **[n8n](https://n8n.io/)** | Low-code workflows | No-code / JS | ✓✓ 400+ integrations | ✓ Visual workflows | ✗ Limited custom logic | ✓ Self-hostable | Very Low | Fast visual automation, no code needed | Not code-first, less flexible for custom logic | **Best for non-developers & low-code automation** |
+| **[AWS Strands](https://aws.amazon.com/)** | AWS-native agent stacks | Python | ✓✓ AWS services native | ✓ Step Functions, Bedrock | ✓ CloudWatch, X-Ray | ✓✓ AWS production patterns | Medium | Tight AWS integration, enterprise deployment | AWS-leaning, smaller community outside AWS | **Best for AWS-native production stacks** |
+| **[Copilot Studio](https://www.microsoft.com/microsoft-copilot/microsoft-copilot-studio)** | Business users, M365 ecosystem | No-code | ✓ M365, Power Platform | ✓ Visual flows | ✗ Limited debugging | ✓ M365 managed | Very Low | Easy UI, Microsoft ecosystem | Platform constraints, less custom control | **Best for M365 business users, no coding needed** |
+| **[Azure AI Studio](https://ai.azure.com/)** | Azure-native build & deploy | Python | ✓✓ Azure-native | ✓ Prompt flow, evaluation | ✓✓ Built-in eval & monitoring | ✓✓ Managed Azure deployment | Medium | Unified model catalog, evaluation, deployment | Azure-centric workflows | **Best for Azure-native build & deployment pipelines** |
 
 For the examples below, we will use **Semantic Kernel (Python)** as a **code‑first** option. The overall flow stays very similar across most frameworks, so feel free to map the same steps to the SDK you prefer.
 
-> **How to pick — a quick guide:**
-> - **Just starting out?** → Start with **LangChain** (largest community, most tutorials and integrations) or **CrewAI** (simple role-based patterns with minimal boilerplate).
-> - **Enterprise / Azure shop?** → Go with **Semantic Kernel** (production-ready, strong .NET + Python, native Azure integration) or **Azure AI Studio** for a managed end-to-end pipeline.
-> - **Building on AWS?** → **AWS Strands** gives you tight AWS-native deployment patterns and integrations out of the box.
-> - **Building a knowledge base or RAG pipeline?** → **LlamaIndex** is purpose-built for retrieval-heavy use cases; pair it with Semantic Kernel or LangChain for the agent orchestration layer.
-> - **Non-technical stakeholders driving the build?** → **Copilot Studio** or **n8n** let business users configure and run workflows without writing code.
-> - **Researching advanced multi-agent patterns?** → **AutoGen** is the go-to for experimenting with agent-to-agent communication and coordination.
-
-**Takeaway:** if you are in Azure/.NET or want strong tool integration, Semantic Kernel is a solid baseline; if you want the broadest ecosystem for prototypes, LangChain or LlamaIndex may feel faster.
-
 ---
 
-## Minimal Agent (SK + Azure OpenAI)
-Below is a minimal, working example. It answers a real policy question using a tiny internal FAQ tool.
+## Building the Agent
+
+We have covered the concept (LLM as core, agent wrapping it with tools, state, and a control loop) and chosen a framework (Semantic Kernel). Now let's turn that loop into running code.
+
+When you build your first agent, four recurring code patterns show up, each with a clear purpose:
+
+1. **Model configuration** — gives the agent its reasoning core (the LLM). Without this, nothing thinks.
+2. **System prompt** — shapes the agent's persona, scope, and behaviour. It tells the LLM *who it is*, *what it knows*, and *when to use a tool*. The LLM reads this on every turn before deciding how to respond.
+3. **Tool registration** — defines what the agent can *do* beyond generating text. This is the "act" phase of the loop.
+4. **Execution call** — triggers the plan → act → observe cycle and returns a grounded answer.
+
+We will keep the tools minimal — one tool that looks up an internal FAQ document — and focus on the reasoning behind each step. The scenario is deliberately practical: an internal policy assistant that can answer questions about release freezes and SEV1 incidents by fetching the right document automatically.
 
 > **Prerequisites:**
 > - Azure OpenAI resource with a deployed model (e.g., `gpt-4o-mini`)
@@ -140,9 +147,9 @@ Below is a minimal, working example. It answers a real policy question using a t
 > - A folder of `.txt` files for FAQs (one policy per file)
 
 **Model recommendations**
-- **Balanced cost/performance:** `gpt-4o-mini`
-- **Higher accuracy:** `gpt-4o`
-- **Fast + inexpensive for experiments:** `gpt-3.5-turbo` (if available in your Azure region)
+- **Fast + cost-effective:** `gpt-4o-mini`
+- **Balanced accuracy:** `gpt-4o`
+- **Advanced reasoning tasks:** `o3-mini` (if available in your Azure region)
 
 For guidance on choosing models, see **[Azure OpenAI model selection](https://learn.microsoft.com/azure/ai-services/openai/concepts/models)**.
 
@@ -182,7 +189,7 @@ def load_faq_docs() -> dict[str, str]:
 
 FAQ = load_faq_docs()  # Loaded once at startup; acts as the agent's private knowledge base
 
-# --- Tool definition ---
+# --- Tool registration ---
 # This class is the agent's only "action": retrieve a policy document by name.
 # The @kernel_function decorator registers it so the LLM can invoke it by name.
 class InternalFaqTool:
@@ -195,8 +202,8 @@ class InternalFaqTool:
         return FAQ.get(key, "Policy not found. Please check with your Release Manager.")
 
 # --- System prompt ---
-# Shapes the agent's persona, scope, and when to call the tool.
-# The LLM reads this on every turn to decide how to respond.
+# Shapes the agent's persona, scope, and when to call a tool.
+# The LLM reads this on every turn before deciding how to respond.
 instructions = """
 You are a helpful internal knowledge assistant.
 If you need a policy, call the lookup_faq tool.
@@ -214,23 +221,22 @@ SETTINGS = OpenAIChatPromptExecutionSettings(
     tool_choice="auto",  # Let the model decide when to call tools
 )
 
-# --- Agent assembly ---
+# --- Model configuration ---
 # Wires together the LLM service, system prompt, tool, and call settings.
-# AzureChatCompletion is the LLM call that drives all reasoning and responses.
 _agent = ChatCompletionAgent(
-    service=AzureChatCompletion(       # LLM: connects to Azure OpenAI
+    service=AzureChatCompletion(       # Connects to Azure OpenAI — this is the LLM API endpoint
         deployment_name=AZURE_OPENAI_DEPLOYMENT,
         endpoint=AZURE_OPENAI_ENDPOINT,
         api_key=AZURE_OPENAI_KEY,
     ),
     name="Policy-Assistant",
-    instructions=instructions,
-    plugins=[InternalFaqTool()],       # Tools the LLM is allowed to call
+    instructions=instructions,         # System prompt
+    plugins=[InternalFaqTool()],       # Registered tools
     arguments=KernelArguments(SETTINGS),
 )
 
-# --- Agent loop entry point ---
-# get_response triggers the full plan → act → observe cycle:
+# --- Execution call ---
+# get_response triggers the full plan → act → observe loop:
 # the LLM decides whether to call a tool or respond directly.
 async def ask_agent(question: str) -> str:
     response = await _agent.get_response(messages=question)
@@ -247,12 +253,9 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
----
+### Exposing the agent via API + simple UI
 
-## Serve the agent via API + simple UI
-Keeping the **backend (API)** separate from the **frontend (UI)** is a standard practice. It makes the agent reusable across multiple clients.
-
-This separation mirrors how production agents are deployed later in the series.
+The agent now works from the command line. For real-world use, we want it accessible over HTTP so any client — a browser, a Slack bot, a CI pipeline — can call it without knowing the agent internals. That means wrapping it in a thin API layer and adding a simple UI. Keeping the **backend (API)** separate from the **frontend (UI)** is standard practice: it makes the agent reusable across multiple clients and mirrors how production agents are deployed later in the series.
 
 ```mermaid
 flowchart LR
@@ -284,7 +287,6 @@ flowchart LR
   API -->|8. Response| FE_UI
 ```
 
-### API server (FastAPI)
 **api.py**
 
 ```python
@@ -308,7 +310,6 @@ async def ask(query: Query):
     return {"answer": answer}
 ```
 
-### Simple Streamlit UI
 **streamlit.py**
 
 ```python
@@ -362,7 +363,7 @@ curl -X POST http://127.0.0.1:8000/ask \
 streamlit run streamlit.py
 ```
 
-**What’s next:** in the next post we will focus on prompt engineering and explicit agent state to make behavior predictable and debuggable.
+**What's next:** in the next post we will focus on prompt engineering and explicit agent state to make behavior predictable and debuggable.
 
 ### Closing note
-Try swapping the FAQ `.txt` files, add one more tool, and watch how the loop behaves. You can also tweak the **prompt**, change the **model deployment**, or adjust **temperature/max_tokens** to see how the agent’s behavior shifts. Keeping changes small and observable is the fastest way to get confident with agents.
+Try swapping the FAQ `.txt` files, add one more tool, and watch how the loop behaves. You can also tweak the **prompt**, change the **model deployment**, or adjust **temperature/max_tokens** to see how the agent's behavior shifts. Keeping changes small and observable is the fastest way to get confident with agents.
