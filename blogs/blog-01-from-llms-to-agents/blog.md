@@ -1,15 +1,14 @@
 # From LLMs to AI Agents — Why a Prompt Is Not Enough
 
-## Intro
 You have probably used AI assistants like **[ChatGPT](https://chat.openai.com/)**, **[Grok](https://x.ai/)**, or **[DeepSeek](https://www.deepseek.com/)**. They are great for everyday work: summarizing documents, explaining logs, writing SQL, generating Python snippets, troubleshooting errors, or drafting emails and reports. Under the hood, these assistants are powered by **Large Language Models (LLMs)** — models trained on vast amounts of text to understand and generate language. If you are like most people, you have also noticed the assistant gets better when you **paste in more context**: more tables, more logs, more documentation, more examples.
 
-That ceiling — the point where pasting more context stops being enough — is where a plain LLM falls short and an agent takes over. To be truly useful in a business context, an assistant must **retrieve the right context** automatically (for example, fetching the latest policy page rather than relying on whatever you pasted last week), **take actions through tools** (like querying a database or calling an API), and **keep state** (remembering earlier steps in a workflow or a multi‑turn investigation). That is what AI agents add on top of LLMs.
+That ceiling — the point where pasting more context stops being enough — is where a plain LLM falls short and an agent takes over. To be truly useful in a business context, an assistant must **retrieve the right context** automatically (for example, fetching the latest policy page rather than relying on whatever you pasted last week), **take actions through tools** (like querying a database or calling an API), and **keep state** (remembering earlier steps in a workflow or a multi-turn investigation). That is what AI agents add on top of LLMs.
 
-In this post, we will build a small **internal policy assistant** that answers release‑freeze and incident questions, and use it as the running example for the series.
+In this post, we will build a small **internal policy assistant** that answers release-freeze and incident questions, and use it as the running example for the series.
 
 ---
 
-## LLM vs Agent
+## LLM vs agent
 
 ### Where LLMs are genuinely useful
 
@@ -38,7 +37,7 @@ In each case, the language capability of the LLM is still exactly what you want 
 
 ---
 
-## What Makes an Agent
+## What makes an agent
 
 An agent does not replace the LLM — it **builds around it**. The LLM stays at the centre, doing what it does best (reasoning and language). The agent framework layers on three capabilities the LLM is missing on its own:
 
@@ -72,7 +71,7 @@ flowchart TB
   State --> Context[Conversation + Workflow Context]
 ```
 
-State is what lets the agent remember you already asked for the SEV1 policy, so it does not re‑fetch it every turn. Tools are what let it actually look that policy up from your internal system, rather than guessing.
+State is what lets the agent remember you already asked for the SEV1 policy, so it does not re-fetch it every turn. Tools are what let it actually look that policy up from your internal system, rather than guessing.
 
 ### The control loop at runtime
 
@@ -96,13 +95,14 @@ This loop is the reason agent code looks different from a plain LLM call: you ne
 
 ---
 
-## Frameworks and SDKs (and how to compare them)
+## Frameworks and SDKs
 
 Understanding the loop and the building blocks is the conceptual foundation. Before writing any code, you need to pick the right framework to implement it — because your choice shapes how easy the loop is to build, inspect, and run in production.
 
 A simple way to choose is to compare frameworks on a few **practical metrics**.
 
 ### Key metrics to compare
+
 1. **Language support** — Does it match your stack (Python, C#, JS, etc.)?
 2. **Tooling & integrations** — Built-in connectors to data, APIs, search, and enterprise tools.
 3. **Orchestration features** — Memory, routing, planners, multi-agent support.
@@ -110,9 +110,9 @@ A simple way to choose is to compare frameworks on a few **practical metrics**.
 5. **Production readiness** — Deployment patterns, security features, monitoring.
 6. **Learning curve** — How fast a beginner can ship something useful.
 
-### Quick comparison (high-level)
+### Quick comparison
 
-| Framework / SDK | Best for | Lang Support | Tooling & Integrations | Orchestration | Control & Transparency | Production Readiness | Learning Curve | Strengths | Trade-offs | Recommendation |
+| Framework / SDK | Best for | Lang support | Tooling & integrations | Orchestration | Control & transparency | Production readiness | Learning curve | Strengths | Trade-offs | Recommendation |
 |---|---|---|---|---|---|---|---|---|---|---|
 | **[Semantic Kernel](https://github.com/microsoft/semantic-kernel)** | Enterprise agents, structured tools | Python, .NET | ✓ Azure, OpenAI, Hugging Face | ✓ Planners, multi-step | ✓ Structured logging | ✓✓ Azure-native | Medium | Tool-first design, strong Azure integration | Smaller community than LangChain | **Best for Azure / .NET enterprise teams** |
 | **[LangChain](https://www.langchain.com/)** | Rapid prototyping, broad ecosystem | Python, JS/TS | ✓✓ 100+ integrations | ✓ Chains, agents, memory | ✓ LangSmith tracing | ✓ Broad deployment | Low | Largest community, most examples | Can feel abstract, harder to debug | **Best for beginners & rapid prototyping** |
@@ -124,11 +124,11 @@ A simple way to choose is to compare frameworks on a few **practical metrics**.
 | **[Copilot Studio](https://www.microsoft.com/microsoft-copilot/microsoft-copilot-studio)** | Business users, M365 ecosystem | No-code | ✓ M365, Power Platform | ✓ Visual flows | ✗ Limited debugging | ✓ M365 managed | Very Low | Easy UI, Microsoft ecosystem | Platform constraints, less custom control | **Best for M365 business users, no coding needed** |
 | **[Azure AI Studio](https://ai.azure.com/)** | Azure-native build & deploy | Python | ✓✓ Azure-native | ✓ Prompt flow, evaluation | ✓✓ Built-in eval & monitoring | ✓✓ Managed Azure deployment | Medium | Unified model catalog, evaluation, deployment | Azure-centric workflows | **Best for Azure-native build & deployment pipelines** |
 
-For the examples below, we will use **Semantic Kernel (Python)** as a **code‑first** option. The overall flow stays very similar across most frameworks, so feel free to map the same steps to the SDK you prefer.
+For the examples below, we will use **Semantic Kernel (Python)** as a code-first option. The overall flow stays very similar across most frameworks, so feel free to map the same steps to the SDK you prefer.
 
 ---
 
-## Building the Agent
+## Building the agent
 
 We have covered the concept (LLM as core, agent wrapping it with tools, state, and a control loop) and chosen a framework (Semantic Kernel). Now let's turn that loop into running code.
 
@@ -236,7 +236,7 @@ _agent = ChatCompletionAgent(
 )
 
 # --- Execution call ---
-# get_response triggers the full plan → act → observe loop:
+# get_response triggers the full plan -> act -> observe loop:
 # the LLM decides whether to call a tool or respond directly.
 async def ask_agent(question: str) -> str:
     response = await _agent.get_response(messages=question)
@@ -332,7 +332,6 @@ if st.button("Ask") and question:
 ---
 
 ## Example run
-**All terminal commands**
 
 ```bash
 # 1) Create and activate a virtual environment
@@ -363,7 +362,10 @@ curl -X POST http://127.0.0.1:8000/ask \
 streamlit run streamlit.py
 ```
 
-**What's next:** in the next post we will focus on prompt engineering and explicit agent state to make behavior predictable and debuggable.
+---
 
-### Closing note
-Try swapping the FAQ `.txt` files, add one more tool, and watch how the loop behaves. You can also tweak the **prompt**, change the **model deployment**, or adjust **temperature/max_tokens** to see how the agent's behavior shifts. Keeping changes small and observable is the fastest way to get confident with agents.
+## Closing note
+
+Try swapping the FAQ `.txt` files, add one more tool, and watch how the loop behaves. You can also tweak the **prompt**, change the **model deployment**, or adjust **temperature/max_tokens** to see how the agent's behaviour shifts. Keeping changes small and observable is the fastest way to get confident with agents.
+
+**What's next:** in the next post we will focus on prompt engineering and explicit agent state to make behaviour predictable and debuggable.
