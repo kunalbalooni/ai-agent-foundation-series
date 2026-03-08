@@ -107,6 +107,33 @@ Apply SSO when: the agent is accessible by more than one person, when different 
 
 ---
 
+## Other Identity Providers
+
+This guide implements SSO using **Azure AD / Microsoft Entra ID** — the natural choice for organisations already on Microsoft 365. The OAuth 2.0 / OIDC protocol and the FastAPI JWT validation pattern are identity-provider-agnostic; only the configuration values (issuer URL, JWKS endpoint, token claims) differ between providers.
+
+If your organisation uses a different identity provider, the same architectural pattern applies. Official documentation for the most common alternatives:
+
+| Provider | Use Case | Official Documentation |
+|---|---|---|
+| **Google Identity** | Google Workspace organisations; consumer-facing applications | [Google Identity — OAuth 2.0 for Web Server Apps](https://developers.google.com/identity/protocols/oauth2/web-server) · [Google Sign-In for Web](https://developers.google.com/identity/sign-in/web/sign-in) |
+| **Okta** | Enterprises with Okta as the corporate IdP; multi-tenant SaaS | [Okta Developer Docs — Add Authentication to Your App](https://developer.okta.com/docs/guides/sign-into-spa-redirect/) · [Okta OIDC Reference](https://developer.okta.com/docs/reference/api/oidc/) |
+| **Auth0 (by Okta)** | Flexible multi-provider auth; B2C with social login | [Auth0 — Single-Page App Quickstart (React)](https://auth0.com/docs/quickstart/spa/react) · [Auth0 — Protect your API](https://auth0.com/docs/quickstart/backend/python) |
+| **AWS Cognito** | AWS-native deployments; user pools with RBAC | [Amazon Cognito — User Pool Auth Flow](https://docs.aws.amazon.com/cognito/latest/developerguide/amazon-cognito-user-pools-authentication-flow.html) · [Cognito — JWT Token Validation](https://docs.aws.amazon.com/cognito/latest/developerguide/amazon-cognito-user-pools-using-tokens-verifying-a-jwt.html) |
+| **Keycloak** | Self-hosted / on-premise; full control over identity infrastructure | [Keycloak — Securing Applications](https://www.keycloak.org/docs/latest/securing_apps/) · [Keycloak — OIDC Protocol](https://www.keycloak.org/docs/latest/server_admin/#_oidc) |
+| **GitHub OAuth** | Developer tools; internal tooling for engineering teams | [GitHub — OAuth Apps](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps) · [GitHub — OIDC](https://docs.github.com/en/actions/security-for-github-actions/security-hardening-your-deployments/about-security-hardening-with-openid-connect) |
+
+> **Provider selection guidance:**
+> - **Microsoft 365 organisation** → Azure AD / Entra ID (this guide)
+> - **Google Workspace organisation** → Google Identity
+> - **Enterprise with existing Okta deployment** → Okta or Auth0
+> - **AWS-native deployment** → AWS Cognito
+> - **Air-gapped or on-premise requirement** → Keycloak
+> - **Internal developer tool** → GitHub OAuth (simpler setup, weaker RBAC than enterprise IdPs)
+
+The JWT validation code in Step 5 of this guide requires three provider-specific values regardless of which provider you use: the **JWKS endpoint URL**, the **issuer string**, and the **audience claim**. Every provider above publishes these in their OIDC discovery document at `<issuer>/.well-known/openid-configuration`.
+
+---
+
 ## Step-by-Step Implementation
 
 ### Prerequisites
