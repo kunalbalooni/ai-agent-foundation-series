@@ -1,6 +1,6 @@
 # AI Agents Blog Series
 
-This repository is an **educational, code‑first blog series** that teaches how to build AI agents step‑by‑step—starting from LLM fundamentals and progressing to a production‑ready, enterprise‑grade system. Each blog introduces only the theory required to justify the code that follows and builds on a single evolving use case.
+This repository is an **educational, code‑first blog series** that teaches how to build AI agents step‑by‑step — starting from LLM fundamentals and progressing to a production‑ready, enterprise‑grade system. Each blog introduces only the theory required to justify the code that follows and builds on a single evolving use case. The series concludes with a structured production pillar framework covering infrastructure, security, observability, and UX.
 
 ## Objective
 Create a practical, code‑first series that explains not just **how** to build agents, but **why** each architectural step is necessary.
@@ -8,7 +8,7 @@ Create a practical, code‑first series that explains not just **how** to build 
 ## Core Approach
 
 - One realistic enterprise use case improved incrementally across blogs
-- Theory first (only what’s necessary), then functional code
+- Theory first (only what's necessary), then functional code
 - Dev‑first implementation, production covered at the end
 - Framework‑agnostic concepts, concrete implementation using **Semantic Kernel**
 
@@ -35,8 +35,8 @@ Create a practical, code‑first series that explains not just **how** to build 
 7. **From Development to Production — Architecture, Security, and Governance**
    Covers what changes when moving to production: deployment architecture, security boundaries, identity, observability, and cost control.
 
-8. **Production Deep Dives (Optional Follow‑ups)**
-   Branch blogs covering implementation details such as Azure deployment, Azure AD integration, RBAC/RLS, monitoring, and evaluation.
+8. **[Productionizing AI Agents — From Prototype to Enterprise System](blogs/blog-08-production-deep-dives/blog.md)**
+   Maps the full set of concerns that separate a working agent from a production-grade system across nine pillars and seven implementation phases: infrastructure, security and identity, data architecture, API protection, agent runtime, tool integration, observability, CI/CD and governance, and UX. Each pillar links to a dedicated implementation guide. This is the architectural map for Level 5 — Production-governed AI systems.
 
 ## Outcome
-By the end of the series, readers will understand not only how to build AI agents, but why each architectural step is necessary—culminating in a production‑ready, enterprise‑grade AI agent.
+By the end of the series, readers will understand not only how to build AI agents, but why each architectural step is necessary — from a minimal single-turn agent to a fully governed, observable, securely deployed system. The production pillar framework in Blog 8 provides a dependency-aware implementation roadmap that applies beyond this series to any enterprise AI agent deployment.
