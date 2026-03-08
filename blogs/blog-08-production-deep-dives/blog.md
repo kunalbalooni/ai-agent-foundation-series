@@ -27,6 +27,26 @@ By the end of this series, the system built across all blogs will satisfy the re
 
 ---
 
+## The System We Are Building
+
+Throughout this series, the running example is an **IT Operations Support Agent** — an internal enterprise tool that:
+
+- Answers questions about company policies, release processes, and incident procedures by retrieving from a structured knowledge base
+- Calls internal tools: ticket lookup, incident status, escalation triggers, and documentation search
+- Maintains conversation history so engineers can ask follow-up questions without repeating context
+- Escalates to a human operator when a query involves an active Sev1 incident or a decision that requires human approval
+- Is accessed by engineers across multiple teams, each with different permission scopes
+
+This agent was introduced in Blog 1 as a minimal single-turn assistant. By Blog 8, it is a multi-agent, multi-tool, production-governed system. Every architectural decision in this blog is grounded in what this agent actually needs to operate safely at enterprise scale.
+
+When the blog discusses an abstract concern — idempotency, row-level security, circuit breakers — the concrete version is always this agent:
+
+> *When the support agent triggers an escalation via the ticketing API, idempotency keys ensure that a network timeout and retry does not open two tickets for the same incident.*
+
+> *Row-level security in the knowledge base ensures that an engineer from the infrastructure team cannot retrieve documents that are scoped to the security team's private runbooks.*
+
+---
+
 ## Strategic Context
 
 There is a predictable sequence of events when an enterprise team moves an AI agent from a working prototype to production without a structured approach.
@@ -34,6 +54,14 @@ There is a predictable sequence of events when an enterprise team moves an AI ag
 The agent demonstrated well. Stakeholders approved. Deployment was framed as a packaging exercise. The engineers containerised the application, pushed it to a cloud environment, and opened an endpoint. Within days, the first production incident arrived. Not a model failure. An architectural gap.
 
 The gap is almost always one of three things. Either the API has no authentication, so an unintended caller — another system, a curious employee, an automated scanner — is sending requests and consuming quota. Or credentials are hardcoded or stored in environment variables, and a deployment log, a container inspection, or a careless commit exposes them. Or the system is producing responses that nobody can explain — there is no trace of what the agent received, what tools it called, or why it answered the way it did.
+
+These failures are not hypothetical. They follow a consistent pattern:
+
+> *In one deployment, the LLM provider API key was stored as an environment variable and printed to stdout during application startup as part of a debug configuration dump. The startup logs were shipped to a shared logging workspace. Within two weeks, the key had been used to make requests from outside the organisation's network. The first signal was an unexpected billing spike — not a security alert.*
+
+> *In another case, a team deployed their support agent without observability. Six months later, users began reporting that the agent was citing a policy document that had been superseded three months earlier. The team had no logs of what documents the agent had retrieved, no trace of which queries had triggered the stale retrieval, and no way to determine how many users had received the incorrect answer. The incident took four days to diagnose. With structured logging and a retrieval trace, it would have taken four minutes.*
+
+> *A third team built a tool that submitted support tickets on behalf of users. They did not implement idempotency keys. During a network instability event, the agent retried the tool call three times. Each retry succeeded. Three duplicate tickets were created for the same incident, two of which were acted on by different engineers before the duplication was noticed.*
 
 These are not exotic failure modes. They are the three most common failure modes across enterprise AI deployments, and they are entirely preventable with the right implementation order.
 
@@ -81,6 +109,69 @@ The table below captures the most common gap between a working prototype and a p
 | FAQs in local `.txt` files | Vector database with permission-filtered RAG retrieval |
 
 This table is not a checklist of nice-to-haves. Each row on the right represents a failure mode that the corresponding left-hand approach cannot prevent at production scale.
+
+---
+
+## System Architecture
+
+The diagram below is the canonical reference for this blog. Every pillar maps to one or more layers in this architecture. When the blog says "Pillar 2 must precede Pillar 5", it means that the authentication and secrets layers must exist before the agent runtime can be deployed safely. Reference this diagram whenever a pillar's position in the dependency chain is unclear.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  USERS (internal engineers, support staff, operations teams)                │
+└─────────────────────────┬───────────────────────────────────────────────────┘
+                          │ HTTPS
+┌─────────────────────────▼───────────────────────────────────────────────────┐
+│  INGRESS LAYER          │  Pillar 1 + Pillar 4                              │
+│  API Gateway · WAF · DDoS Protection · Rate Limiting · TLS Termination      │
+└─────────────────────────┬───────────────────────────────────────────────────┘
+                          │
+┌─────────────────────────▼───────────────────────────────────────────────────┐
+│  AUTHENTICATION LAYER   │  Pillar 2                                         │
+│  Azure AD / Entra ID SSO · JWT Validation · RBAC · Managed Identity         │
+│  Secrets: Azure Key Vault (no credentials in code or environment variables) │
+└─────────────────────────┬───────────────────────────────────────────────────┘
+                          │ Authenticated request + CurrentUser context
+┌─────────────────────────▼───────────────────────────────────────────────────┐
+│  AGENT ORCHESTRATOR     │  Pillar 5                                         │
+│  FastAPI · Semantic Kernel · System Prompt · Context Window Management      │
+│  Conversation History (Redis) · Session Isolation per User                  │
+└──────┬──────────────────┬──────────────────────────┬───────────────────────┘
+       │                  │                          │
+┌──────▼──────┐  ┌────────▼─────────┐  ┌────────────▼────────────────────────┐
+│  LLM        │  │  RETRIEVAL       │  │  TOOL EXECUTION   │  Pillar 6        │
+│  Pillar 5   │  │  Pillar 3        │  │  Tool Registry · Auth · Timeouts    │
+│             │  │                  │  │  Circuit Breakers · Idempotency Keys │
+│  Primary    │  │  Vector DB       │  │  Human-in-the-Loop for Sev1 actions  │
+│  model      │  │  (pgvector /     │  │  Audit log per invocation            │
+│             │  │  Azure AI Search)│  └──────────────┬──────────────────────┘
+│  Fallback   │  │                  │                 │
+│  model      │  │  Row-level       │  ┌──────────────▼──────────────────────┐
+│             │  │  security filter │  │  EXTERNAL SYSTEMS                   │
+│  Circuit    │  │  before LLM      │  │  Ticketing API · Incident DB        │
+│  breaker    │  │                  │  │  Documentation Search · Escalation  │
+└─────────────┘  └──────────────────┘  └─────────────────────────────────────┘
+
+─────────────────────────── CROSS-CUTTING LAYERS ────────────────────────────
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  OBSERVABILITY  │  Pillar 7                                                 │
+│  OpenTelemetry · Structured Logs · Distributed Traces · Metrics · Alerts   │
+│  Token cost attribution · Agent decision provenance · Session replay        │
+└─────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  DATA LAYER  │  Pillar 3                                                    │
+│  PostgreSQL (conversation history, audit records) · Redis (session, cache) │
+│  Blob Storage (knowledge base documents) · Encryption at rest + in transit  │
+└─────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  CI/CD & GOVERNANCE  │  Pillar 8                                            │
+│  GitHub Actions · Infrastructure as Code · Blue-Green · Rollback            │
+│  Compliance · Audit trails · Testing pipeline · Content moderation          │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+In the architecture above, Pillars 1–4 establish the foundation on which the agent runtime operates. The agent orchestrator in Pillar 5 depends on every layer below it being in place. Pillars 6, 7, and 8 extend the runtime with tool execution safety, operational visibility, and deployment governance. Pillar 9 sits at the top — the UX and cost layer that users see — and is only meaningful once everything beneath it is stable.
 
 ---
 
@@ -204,6 +295,8 @@ The data layer is built in Phase 3 because RAG retrieval, conversation history, 
 - **Row-level security** — filtering knowledge retrieval results by the requesting user's permissions before passing content to the LLM
 - **Column-level encryption** — protecting sensitive fields in relational tables independently of table-level encryption
 
+> ⚠️ **Reality Check:** Vector databases are frequently introduced early in AI prototypes because they are the most visible part of the RAG pipeline. In many production systems, however, a well-indexed PostgreSQL database with pgvector is sufficient for the first scale stage — and significantly simpler to operate, back up, and secure than a standalone vector database service. Evaluate the retrieval volume and latency requirements before committing to a dedicated vector database.
+
 > 📋 **Pillar Blog:** *Data Architecture — Production RAG Storage, Conversation Persistence, Redis Caching, PII Handling, and Data Sovereignty* — Coming Soon
 
 ---
@@ -315,6 +408,8 @@ Observability is built in Phase 5, after the system is functional but before it 
 - **Anomaly detection** — baseline deviation alerts for unusual usage patterns
 - **Synthetic monitoring** — scheduled test queries that verify end-to-end agent functionality from outside the system
 - **Session replay** — reconstructing a complete session from logs for debugging and compliance review
+
+> ⚠️ **Reality Check:** Most teams skip observability in their first agent deployment. The reasoning is usually "we'll add it later." Six months later, the first serious incident occurs — an incorrect answer is given, a tool call misbehaves, token costs spike unexpectedly — and the team discovers they cannot reconstruct what the agent actually did. Observability is not a refinement. It is the only way to know what your system is doing in production.
 
 > 📋 **Pillar Blog:** *Observability — OpenTelemetry, Structured Logging, LLM Metrics, Dashboards, and Agent Decision Provenance* — Coming Soon
 
@@ -493,6 +588,26 @@ Cost optimisation is introduced last, not because it is unimportant, but because
 | 9. Performance, UX & Cost | Optimisation | 7 | Pillars 1–8 | Scale and quality |
 
 **Implementation principle:** Do not begin a pillar until the pillars it depends on are in a stable, operational state. A pillar that is "mostly done" is not a reliable dependency.
+
+### Estimated Engineering Effort
+
+The table below reflects realistic delivery estimates for a small, experienced team (2–4 engineers) working on each pillar for the first time in a new environment. Effort varies significantly based on existing cloud infrastructure, organisational security requirements, and the complexity of the tool integrations involved.
+
+| Pillar | Typical Effort | Primary Variable |
+|---|---|---|
+| 1. Infrastructure & Network | 1–2 weeks | Existing VNet / Kubernetes setup |
+| 2. Security & Identity | 1–2 weeks | Entra ID configuration, admin consent process |
+| 3. Data Architecture | 1 week | Number of storage systems; compliance requirements |
+| 4. API Security & Traffic | 3–5 days | WAF rule tuning; rate limit threshold decisions |
+| 5. Core Agent Runtime | 1 week | Prompt design and evaluation; fallback model setup |
+| 6. Tool Integration | 1–2 weeks | Number of tools; idempotency requirements per tool |
+| 7. Observability | 1 week | OpenTelemetry instrumentation; dashboard creation |
+| 8. CI/CD, Compliance & Testing | 1–2 weeks | Compliance scope; test suite depth |
+| 9. Performance, UX & Cost | 1–2 weeks | Frontend complexity; streaming implementation |
+
+**Total:** 9–16 weeks for a full production-grade deployment from a working prototype. The wide range reflects the difference between a greenfield deployment on a cloud account with no existing infrastructure and a deployment into an organisation with established VNets, identity providers, and CI/CD pipelines that the agent can build on.
+
+> ⚠️ **Reality Check:** Teams that attempt to implement all nine pillars simultaneously — rather than sequentially — consistently underestimate the dependency chain. The most common outcome is a partially implemented system that is neither a safe development environment nor a production-grade deployment. The phases exist to prevent this. Build sequentially.
 
 ---
 
