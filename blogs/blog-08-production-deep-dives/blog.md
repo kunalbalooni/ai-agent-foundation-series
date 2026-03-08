@@ -263,7 +263,15 @@ Identity is the foundation of every other security control. Until you know who i
 - **WAF** — web application firewall rules for common attack patterns
 - **DDoS protection** — volumetric attack mitigation at the ingress layer
 
-> 📋 **Pillar Blog:** *Security and Identity — SSO, Managed Identity, JWT Validation, Secrets Management, and API Security* — Coming Soon
+**Pillar 2 Implementation Guides:**
+
+> 📋 [**SSO Authentication — Azure AD / Microsoft Entra ID**](pillar-02-security-sso/blog.md) — Two-app-registration pattern, MSAL React integration, FastAPI JWT validation, group-based RBAC, admin consent, and troubleshooting.
+
+> 📋 **Secrets Management — Azure Key Vault and Managed Identity** — Removing credentials from environment variables and images; Key Vault references in Container Apps; Managed Identity for service-to-service calls; secret rotation without redeployment. — *Coming Soon*
+
+> 📋 **API Security — CORS, Rate Limiting, Request Validation, and WAF** — Per-environment origin allowlists; per-user and per-endpoint rate limits; JSON schema validation middleware; WAF rule configuration for AI-specific abuse patterns. — *Coming Soon*
+
+> 📋 **Network Security — TLS, Security Groups, and Private Endpoints** — Enforcing encrypted transport at every boundary; default-deny security group rules; private endpoint configuration for Key Vault, Container Registry, and OpenAI. — *Coming Soon*
 
 ---
 
