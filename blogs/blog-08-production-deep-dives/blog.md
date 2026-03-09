@@ -223,7 +223,13 @@ This is the first pillar not because it is the most exciting, but because it is 
 - **Kubernetes / Container Orchestration** — cluster configuration, node pools, namespace isolation, resource quotas
 - **Containerisation (Docker)** — image build strategy, base image selection, layer optimisation
 
-> 📋 **Pillar Blog:** *Infrastructure and Network Foundations — VNet Design, Private Endpoints, Kubernetes, and Container Strategy* — Coming Soon
+**Pillar 1 Implementation Guides:**
+
+> 📋 **VNet Design, Subnets, NAT, and Private Endpoints** — Network topology for enterprise AI; address space planning; outbound-only NAT; PrivateLink for OpenAI, Key Vault, and Container Registry without public internet traversal. — *Coming Soon*
+
+> 📋 **Kubernetes and Container Orchestration** — AKS / EKS cluster configuration; node pool sizing; namespace isolation per environment; resource quotas and limit ranges; container image build strategy and base image selection. — *Coming Soon*
+
+> 📋 **API Gateway, Load Balancer, and TLS Termination** — Managed ingress with routing rules; certificate provisioning and automated renewal; health check configuration; zero-downtime traffic shifting for deployments. — *Coming Soon*
 
 ---
 
@@ -305,7 +311,13 @@ The data layer is built in Phase 3 because RAG retrieval, conversation history, 
 
 > ⚠️ **Reality Check:** Vector databases are frequently introduced early in AI prototypes because they are the most visible part of the RAG pipeline. In many production systems, however, a well-indexed PostgreSQL database with pgvector is sufficient for the first scale stage — and significantly simpler to operate, back up, and secure than a standalone vector database service. Evaluate the retrieval volume and latency requirements before committing to a dedicated vector database.
 
-> 📋 **Pillar Blog:** *Data Architecture — Production RAG Storage, Conversation Persistence, Redis Caching, PII Handling, and Data Sovereignty* — Coming Soon
+**Pillar 3 Implementation Guides:**
+
+> 📋 **Conversation Persistence with PostgreSQL** — Schema design for multi-turn conversation history; session isolation per user; audit record storage; backup and retention policies for conversation data. — *Coming Soon*
+
+> 📋 **Production RAG Storage — Vector DB, pgvector, and Row-Level Security** — Comparing pgvector vs dedicated vector databases; embedding pipeline design; similarity search configuration; filtering retrieval results by user permissions before passing to the LLM. — *Coming Soon*
+
+> 📋 **Redis Caching, PII Handling, and Data Sovereignty** — Session state caching; semantic response caching; automated PII detection and redaction in queries and responses; data residency controls and geographic processing constraints. — *Coming Soon*
 
 ---
 
@@ -327,7 +339,11 @@ This pillar builds on the identity and secrets foundation of Pillar 2 and adds t
 - **API key management** — key scoping, expiry, rotation workflows, and revocation
 - **IP allowlisting** — network-level access restriction for administrative and internal endpoints
 
-> 📋 **Pillar Blog:** *API Security and Traffic Protection — WAF Configuration, Rate Limiting, Request Validation, and Abuse Prevention for AI APIs* — Coming Soon
+**Pillar 4 Implementation Guides:**
+
+> 📋 **WAF, DDoS Protection, and Request Validation** — OWASP rule set configuration; custom WAF rules for AI-specific abuse patterns (prompt injection via URL, oversized JSON payloads); DDoS protection tiers; JSON schema validation middleware; content-type enforcement. — *Coming Soon*
+
+> 📋 **Rate Limiting, Timeouts, and API Key Management** — Per-user, per-session, per-IP, and per-API-key rate limits with burst allowances; connection, read, and LLM response timeout configuration at each layer; API key scoping, expiry, rotation, and revocation workflows. — *Coming Soon*
 
 ---
 
@@ -358,7 +374,11 @@ This is the first pillar that is specific to AI agents rather than general API s
 - **Prompt governance** — version control, review process, and regression testing for system prompt changes
 - **Model version management** — evaluation against a golden dataset before switching to a new model version
 
-> 📋 **Pillar Blog:** *Core Agent Runtime — System Prompt Governance, Context Window Strategy, Fallback Models, and Resilience Patterns* — Coming Soon
+**Pillar 5 Implementation Guides:**
+
+> 📋 **System Prompt Governance and Context Window Strategy** — Versioning and review process for system prompts; structured prompt schemas; windowed conversation history; summarisation-based truncation; regression testing on prompt changes; golden dataset evaluation before model version upgrades. — *Coming Soon*
+
+> 📋 **Fallback Models, Retry Backoff, and Circuit Breakers** — Multi-region and multi-tier fallback model configuration; exponential backoff with jitter for transient LLM errors; circuit breaker state management; health-aware routing between primary and fallback deployments. — *Coming Soon*
 
 ---
 
@@ -381,7 +401,11 @@ Tool integration is where AI agents become meaningfully different from conventio
 - **Human-in-the-loop controls** — defining which tool invocations require human approval before execution; mandatory for irreversible or high-risk actions
 - **Audit logs for tool calls** — every tool invocation is logged with the requesting identity, input parameters, output, latency, and success/failure status
 
-> 📋 **Pillar Blog:** *Tool Integration — Registry Design, Authentication, Idempotency, Circuit Breakers, and Human-in-the-Loop Controls* — Coming Soon
+**Pillar 6 Implementation Guides:**
+
+> 📋 **Tool Registry, Authentication, and Idempotency** — Versioned tool catalogue with schema definitions and permission requirements; per-tool service identity authentication; idempotency key design and enforcement; tool versioning strategy to prevent breaking changes from affecting running agents. — *Coming Soon*
+
+> 📋 **Circuit Breakers, Timeouts, and Human-in-the-Loop Controls** — Per-tool circuit breaker state management; timeout configuration per external API; rate limits to protect downstream services; defining and enforcing human approval gates for irreversible or high-risk tool actions; audit log schema for every tool invocation. — *Coming Soon*
 
 ---
 
@@ -419,7 +443,11 @@ Observability is built in Phase 5, after the system is functional but before it 
 
 > ⚠️ **Reality Check:** Most teams skip observability in their first agent deployment. The reasoning is usually "we'll add it later." Six months later, the first serious incident occurs — an incorrect answer is given, a tool call misbehaves, token costs spike unexpectedly — and the team discovers they cannot reconstruct what the agent actually did. Observability is not a refinement. It is the only way to know what your system is doing in production.
 
-> 📋 **Pillar Blog:** *Observability — OpenTelemetry, Structured Logging, LLM Metrics, Dashboards, and Agent Decision Provenance* — Coming Soon
+**Pillar 7 Implementation Guides:**
+
+> 📋 **Structured Logging and Distributed Tracing with OpenTelemetry** — JSON log schema design; correlation ID propagation from HTTP ingress through LLM and tool calls; OpenTelemetry instrumentation for FastAPI and Semantic Kernel; LLM call spans with token and latency attribution; PII redaction before log emission. — *Coming Soon*
+
+> 📋 **Metrics, Dashboards, Alerts, and Agent Cost Attribution** — p50/p95/p99 latency metrics; per-tool error rate tracking; token usage dashboards per user and per team; cost-per-request estimation; alert thresholds for latency, error rates, and budget; synthetic monitoring and session replay. — *Coming Soon*
 
 ---
 
@@ -463,11 +491,13 @@ This pillar covers three related concerns that mature together as the system app
 - **A/B testing** — controlled comparison of prompt variants, model versions, or retrieval strategies
 - **Chaos engineering** — deliberate introduction of failures (LLM timeout, tool unavailability, database degradation) to validate resilience controls
 
-> 📋 **Pillar Blog:** *CI/CD and Deployment — GitHub Actions, Infrastructure as Code, Blue-Green Deployments, and Rollback Strategy* — Coming Soon
+**Pillar 8 Implementation Guides:**
 
-> 📋 **Pillar Blog:** *Compliance and Governance — Audit Trails, Data Privacy, Content Moderation, and Incident Response* — Coming Soon
+> 📋 **CI/CD and Deployment — GitHub Actions, Infrastructure as Code, Blue-Green, and Rollback** — GitOps-based deployment; Bicep/Terraform IaC for all cloud resources; environment parity across dev/staging/production; blue-green deployments with instant rollback; canary releases with automated error-rate gating; feature flags for decoupled rollouts. — *Coming Soon*
 
-> 📋 **Pillar Blog:** *Testing Strategy — Regression Tests, Hallucination Detection, Load Tests, and Red Team Testing for AI Agents* — Coming Soon
+> 📋 **Compliance and Governance — Audit Trails, Data Privacy, Content Moderation, and Incident Response** — Tamper-evident interaction logs; GDPR/CCPA consent management and data subject rights; content moderation for harmful outputs; model cards; vulnerability scanning in CI; penetration testing schedule; incident response playbook; SLA definition and measurement. — *Coming Soon*
+
+> 📋 **Testing Strategy — Regression Tests, Hallucination Detection, Load Tests, and Red Team Testing** — Golden dataset evaluation on every system prompt change; hallucination detection against retrieved context; load tests for auto-scaling validation; red team testing for prompt injection and scope bypass; chaos engineering for resilience validation; A/B testing for prompt and model variants. — *Coming Soon*
 
 ---
 
@@ -479,6 +509,10 @@ This pillar is last because it is only meaningful once the backend is stable, se
 
 ### Performance and Scalability
 
+**What it is:** The set of architectural decisions that allow the agent system to handle increasing load without degradation — through horizontal scaling, caching, connection pooling, and validated throughput capacity.
+
+**Why it is necessary:** A system that works for ten concurrent users may fail silently for one hundred. Auto-scaling without load testing is a guess. Caching without a defined invalidation strategy is a reliability risk. Connection pooling without tuned limits causes connection exhaustion under burst traffic. Performance engineering is the difference between a system that survives its first traffic spike and one that is taken offline by it.
+
 - **Auto-scaling** — horizontal scaling of the application tier based on request volume; scale-to-zero for non-production environments
 - **Caching** — Redis for session state and frequently-retrieved documents; CDN for static frontend assets
 - **Connection pooling** — database and Redis connection pooling to prevent connection exhaustion under load
@@ -487,11 +521,15 @@ This pillar is last because it is only meaningful once the backend is stable, se
 - **Cold start mitigation** — pre-warming strategies for serverless or container-based deployments with significant cold start latency
 - **Load testing** — validating auto-scaling behaviour and identifying throughput ceilings before production traffic arrives
 
-> 📋 **Pillar Blog:** *Performance and Scalability — Auto-scaling, Caching, Connection Pooling, and Load Testing for AI Agent Systems* — Coming Soon
+**Pillar 9 Implementation Guides — Performance:**
+
+> 📋 **Performance and Scalability — Auto-scaling, Caching, Connection Pooling, and Load Testing** — Horizontal scaling based on request volume; scale-to-zero for non-production; Redis session and document caching; database connection pooling; query optimisation; cold start mitigation; load test validation of auto-scaling thresholds. — *Coming Soon*
 
 ### User Experience
 
 The UX layer is the part of the system that users directly evaluate. It is also the part that most directly reflects the stability of everything beneath it. An agent that streams responses, shows its reasoning, and handles errors gracefully communicates competence — even when the underlying response is complex or slow. An agent that shows a blank screen for eight seconds and then dumps a wall of text communicates unreliability, regardless of the accuracy of its answer.
+
+**Pillar 9 Implementation Guides — User Experience:**
 
 #### From Streamlit to a Production Frontend
 
@@ -565,6 +603,10 @@ For production, a React-based frontend (or equivalent: Next.js, Vue, Angular) co
 
 ### Cost Governance
 
+**What it is:** The set of controls that make the cost of operating the agent system visible, predictable, and attributable — through token budgets, model tiering, semantic caching, and per-team chargeback reporting.
+
+**Why it is necessary:** LLM cost is variable and non-linear in a way that conventional API cost is not. A single long context window with a premium model can cost more than a thousand short queries. Without token budgets, a single user or a runaway session can exhaust a monthly allocation in hours. Without model tiering, every query — regardless of complexity — is sent to the most expensive model. Cost governance converts an unpredictable operational expense into a managed, auditable line item.
+
 Cost optimisation is introduced last, not because it is unimportant, but because optimising cost before usage patterns are known creates premature constraints. Caching a query type that turns out to be rare wastes engineering effort. Routing to a cheaper model before the quality threshold is understood creates a quality regression.
 
 - **Token budgets** — per-session, per-user, and per-team token limits enforced at the middleware layer
@@ -577,7 +619,7 @@ Cost optimisation is introduced last, not because it is unimportant, but because
 - **Cost alerts** — budget threshold notifications at 50%, 80%, and 100% of monthly allocation
 - **Chargeback reporting** — per-team cost attribution based on token usage and compute consumption
 
-> 📋 **Pillar Blog:** *Cost Governance — Token Budgets, Model Tiering, Semantic Caching, and Chargeback Reporting* — Coming Soon
+> 📋 **Cost Governance — Token Budgets, Model Tiering, Semantic Caching, and Chargeback Reporting** — Per-session, per-user, and per-team token limits at middleware; model tiering to route simple queries to lower-cost deployments; semantic caching to avoid redundant LLM calls; chargeback reports per team based on token and compute consumption; budget alerts at 50%, 80%, and 100% of monthly allocation. — *Coming Soon*
 
 ---
 
