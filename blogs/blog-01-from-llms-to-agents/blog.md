@@ -39,15 +39,27 @@ In each case, the language capability of the LLM is still exactly what you want 
 
 ## What makes an agent
 
-An agent does not replace the LLM — it **builds around it**. The LLM stays at the centre, doing what it does best (reasoning and language). The agent framework layers on three capabilities the LLM is missing on its own:
+An agent does not replace the LLM — it **builds around it**.
 
-- **Tools** — the ability to call APIs or functions (so it can *act*)
-- **State** — memory and context across steps (so it can *remember*)
-- **Control loop** — a repeatable plan/act/observe cycle (so it can *drive a workflow*)
+The LLM remains the reasoning core, doing what it does best: interpreting language, planning steps, and generating responses. What an agent framework adds are the capabilities needed to turn that reasoning into a reliable multi-step system.
 
-### The building blocks
+In practice, three capabilities are required:
 
-The architecture diagram below shows the relationship: the LLM is the reasoning core, surrounded by tools, state, and the control loop that orchestrates everything.
+**Tools** — functions or APIs the agent can call so it can act on the world, not just describe it.
+In the policy assistant, this means fetching the actual release-freeze document rather than guessing its contents.
+
+**State** — memory and context that persists across steps so the agent can remember what it has already retrieved, decided, or been told.
+Without state, every turn starts from scratch.
+
+**Control loop** — a repeatable plan → act → observe cycle that drives the workflow forward until the task is complete.
+
+These three pieces turn a single LLM call into a structured reasoning process.
+
+### How these pieces fit together
+
+Once these components are defined, the overall architecture becomes easier to understand. The LLM acts as the reasoning engine, the control loop orchestrates each step of the workflow, tools connect the agent to external systems, and state carries context across the entire process.
+
+The diagram below shows how these parts interact.
 
 ```mermaid
 flowchart TB
@@ -71,15 +83,25 @@ flowchart TB
   State --> Context[Conversation + Workflow Context]
 ```
 
-State is what lets the agent remember you already asked for the SEV1 policy, so it does not re-fetch it every turn. Tools are what let it actually look that policy up from your internal system, rather than guessing.
+Two connections are particularly important.
+
+**State ↔ LLM**
+Every decision the agent makes is informed by the current state. This is what allows the agent to remember that you already asked for the SEV1 policy and avoid fetching it repeatedly.
+
+**Tools → External systems**
+Tools allow the agent to retrieve real data from APIs, databases, and internal systems rather than relying on training data alone.
+
+Together, these components allow the agent to reason, retrieve information, and maintain continuity across steps.
 
 ### The control loop at runtime
 
-Those building blocks only become useful when the agent is actually running. At runtime, the agent follows a tight loop:
+The architecture diagram shows the static structure of the system. What actually happens when a user sends a request?
 
-1. **Plan** — the LLM reasons about what to do next given the current state
-2. **Act** — it either calls a tool or returns a direct response
-3. **Observe** — the result is fed back into state and the loop repeats if needed
+Each message triggers the control loop, which repeatedly executes three steps:
+
+1. **Plan** — the LLM reads the current state and decides what to do next.
+2. **Act** — it either calls a tool (if more information or an action is required) or produces a response.
+3. **Observe** — the result of the action is added to state, allowing the agent to continue reasoning.
 
 ```mermaid
 flowchart TD
@@ -91,7 +113,7 @@ flowchart TD
     F --> B
 ```
 
-This loop is the reason agent code looks different from a plain LLM call: you need a tool registry, an execution kernel, and a state store — one for each phase of the loop.
+This loop is what makes agent systems different from a simple LLM prompt. Instead of producing a single answer, the agent can retrieve information, perform actions, update its internal state, and iterate until the task is complete.
 
 ---
 
@@ -147,11 +169,22 @@ We will keep the tools minimal — one tool that looks up an internal FAQ docume
 > - A folder of `.txt` files for FAQs (one policy per file)
 
 **Model recommendations**
-- **Fast + cost-effective:** `gpt-4o-mini`
-- **Balanced accuracy:** `gpt-4o`
-- **Advanced reasoning tasks:** `o3-mini` (if available in your Azure region)
 
-For guidance on choosing models, see **[Azure OpenAI model selection](https://learn.microsoft.com/azure/ai-services/openai/concepts/models)**.
+The model you choose affects response quality, latency, and cost on every call. For this series, all three matter — but they matter differently at different stages.
+
+| Model | Best for | Typical latency | Relative cost |
+|---|---|---|---|
+| `gpt-4o-mini` | Prototyping, FAQ retrieval, low-complexity queries | Fast | Low |
+| `gpt-4o` | Production agents, nuanced reasoning, structured output | Medium | Medium |
+| `o3-mini` | Multi-step reasoning, complex planning, chain-of-thought | Slower | High |
+
+**For this blog:** `gpt-4o-mini` is sufficient. The agent is doing simple FAQ retrieval — tool selection and direct answering, not complex reasoning. Using a more capable model here provides no measurable benefit.
+
+**When to step up to `gpt-4o`:** When the agent must follow multi-condition instructions reliably, produce structured output (JSON schemas, step-by-step plans), or when response quality is directly visible to end users.
+
+**When to consider `o3-mini`:** When the agent needs extended chain-of-thought reasoning — for example, diagnosing a multi-system incident or decomposing a complex query into a sequence of tool calls. Note that `o3-mini` is not available in all Azure regions; check the [model availability page](https://learn.microsoft.com/azure/ai-services/openai/concepts/models) before planning around it.
+
+**A practical rule:** start with `gpt-4o-mini`, measure where it falls short, then upgrade the specific deployment that is underperforming. Upgrading everything at once makes it harder to isolate what actually improved.
 
 > **No Azure subscription yet?** **[free-llm-api-resources](https://github.com/cheahjs/free-llm-api-resources)** is a regularly updated GitHub repository that tracks free tiers, trial credits, and open-access endpoints across many providers. It is a practical starting point if you want to experiment before committing to a paid service.
 
