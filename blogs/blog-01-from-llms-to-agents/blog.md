@@ -150,18 +150,74 @@ For the examples below, we will use **Semantic Kernel (Python)** as a code-first
 
 ---
 
+
 ## Building the agent
 
 We have covered the concept (LLM as core, agent wrapping it with tools, state, and a control loop) and chosen a framework (Semantic Kernel). Now let's turn that loop into running code.
 
-When you build your first agent, four recurring code patterns show up, each with a clear purpose:
+To keep the example practical, we will build a small internal policy assistant. The assistant answers questions about release freezes and SEV1 incidents by retrieving the correct internal FAQ document.
 
-1. **Model configuration** — gives the agent its reasoning core (the LLM). Without this, nothing thinks.
-2. **System prompt** — shapes the agent's persona, scope, and behaviour. It tells the LLM *who it is*, *what it knows*, and *when to use a tool*. The LLM reads this on every turn before deciding how to respond.
-3. **Tool registration** — defines what the agent can *do* beyond generating text. This is the "act" phase of the loop.
-4. **Execution call** — triggers the plan → act → observe cycle and returns a grounded answer.
+Rather than running only as a script, we will structure the example the way real agent systems are deployed:
 
-We will keep the tools minimal — one tool that looks up an internal FAQ document — and focus on the reasoning behind each step. The scenario is deliberately practical: an internal policy assistant that can answer questions about release freezes and SEV1 incidents by fetching the right document automatically.
+- a **frontend UI** where a user asks a question
+- a **backend API** that receives requests
+- an **agent system** that performs the reasoning and tool calls
+- an **LLM service** that powers the reasoning
+
+The architecture looks like this.
+
+```mermaid
+flowchart LR
+
+  %% User
+  User[User]
+
+  %% Frontend
+  subgraph Frontend
+    UI[Streamlit UI]
+  end
+
+  %% Backend
+  subgraph Backend
+    API[FastAPI API]
+
+    subgraph Agent_System[Agent System]
+      Agent[Agent Control Loop]
+      Tool[lookup_faq Tool]
+      Docs[(FAQ Documents)]
+    end
+  end
+
+  %% LLM
+  subgraph LLM_Service[LLM Service]
+    LLM[Azure OpenAI Model]
+  end
+
+  %% Flow
+  User --> UI
+  UI -->|HTTP request| API
+  API -->|question| Agent
+
+  Agent -->|tool call| Tool
+  Tool --> Docs
+  Docs -->|policy text| Tool
+  Tool --> Agent
+
+  Agent -->|prompt| LLM
+  LLM -->|completion| Agent
+
+  Agent -->|answer| API
+  API --> UI
+  UI --> User
+```
+
+The important design choice here is separating the agent, API, and UI. The agent contains the reasoning loop, the API exposes it over HTTP, and the UI simply calls that API. This mirrors how most production systems are structured and makes the agent reusable across different clients (web apps, Slack bots, CI pipelines, and so on).
+
+We will implement the system in three small files:
+
+- **`agent.py`** — the agent logic (LLM + tools + control loop)
+- **`api.py`** — a thin HTTP wrapper around the agent
+- **`streamlit.py`** — a minimal browser UI
 
 > **Prerequisites:**
 > - Azure OpenAI resource with a deployed model (e.g., `gpt-4o-mini`)
@@ -188,7 +244,14 @@ The model you choose affects response quality, latency, and cost on every call. 
 
 > **No Azure subscription yet?** **[free-llm-api-resources](https://github.com/cheahjs/free-llm-api-resources)** is a regularly updated GitHub repository that tracks free tiers, trial credits, and open-access endpoints across many providers. It is a practical starting point if you want to experiment before committing to a paid service.
 
-### Full example
+### The agent code
+
+Before looking at the full implementation, it helps to recognise four recurring patterns that appear in most agent code:
+
+1. **Model configuration** — gives the agent its reasoning core (the LLM). Without this, nothing thinks.
+2. **System prompt** — shapes the agent's persona, scope, and behaviour. It tells the LLM *who it is*, *what it knows*, and *when to use a tool*. The LLM reads this on every turn before deciding how to respond.
+3. **Tool registration** — defines what the agent can *do* beyond generating text. This is the "act" phase of the loop.
+4. **Execution call** — triggers the plan → act → observe cycle and returns a grounded answer.
 
 **agent.py**
 
@@ -286,39 +349,7 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-### Exposing the agent via API + simple UI
-
-The agent now works from the command line. For real-world use, we want it accessible over HTTP so any client — a browser, a Slack bot, a CI pipeline — can call it without knowing the agent internals. That means wrapping it in a thin API layer and adding a simple UI. Keeping the **backend (API)** separate from the **frontend (UI)** is standard practice: it makes the agent reusable across multiple clients and mirrors how production agents are deployed later in the series.
-
-```mermaid
-flowchart LR
-  User[User] --> FE_UI
-
-  subgraph Frontend
-    FE_UI[Browser UI - Streamlit]
-  end
-
-  subgraph Backend
-    API[FastAPI Backend]
-    subgraph Agent_System[Agent System]
-      Agent[Agent]
-      Files[FAQ txt files]
-    end
-  end
-
-  subgraph LLM_Service[LLM Service]
-    LLM[Azure OpenAI Endpoint]
-  end
-
-  FE_UI -->|1. HTTP API call| API
-  API -->|2. Forward question| Agent
-  Agent -->|3. Tool call: lookup_faq| Files
-  Files -->|4. Retrieved context| Agent
-  Agent -->|5. LLM call| LLM
-  LLM -->|6. Response| Agent
-  Agent -->|7. Answer| API
-  API -->|8. Response| FE_UI
-```
+The agent now works from the command line. To make it usable by other systems, we expose it through a simple HTTP API. The API layer is intentionally thin — it simply receives a question and delegates to the agent. Keeping this layer minimal ensures the agent logic remains reusable.
 
 **api.py**
 
@@ -342,6 +373,8 @@ async def ask(query: Query):
     answer = await ask_agent(query.question)  # Delegates to the agent loop (LLM call happens here)
     return {"answer": answer}
 ```
+
+Finally, we add a minimal browser interface using Streamlit. The UI sends the user's question to the API and displays the returned answer. This layer contains no agent logic — it simply acts as a client.
 
 **streamlit.py**
 
