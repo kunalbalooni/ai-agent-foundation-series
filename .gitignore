@@ -10,3 +10,6 @@ __pycache__/
 *.sqlite
 *.db
 blog-writing-instructions.md
+
+# Generated code — pillar-02-security-sso
+blogs/blog-08-production-deep-dives/pillar-02-security-sso/code/
