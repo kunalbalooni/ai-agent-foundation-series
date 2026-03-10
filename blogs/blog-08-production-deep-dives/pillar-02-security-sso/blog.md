@@ -142,7 +142,7 @@ The JWT validation code in Step 5 of this guide requires three provider-specific
 - Azure CLI installed and authenticated (`az login`)
 - The FastAPI backend and React frontend from the series (or equivalent)
 - `python-jose[cryptography]` and `httpx` installed in the backend
-- `@azure/msal-react` and `@azure/msal-browser` installed in the frontend
+- `@azure/msal-react` and `@azure/msal-browser` v3+ installed in the frontend — v3 requires explicit instance initialization before the instance is passed to `MsalProvider` (see Step 4)
 
 ---
 
@@ -334,18 +334,29 @@ import { MsalProvider } from "@azure/msal-react";
 import { msalConfig } from "./authConfig";
 import App from "./App";
 
-// Create the MSAL instance once at app startup
-// This instance manages token acquisition and caching for the entire app
+// Create the MSAL instance once at app startup.
+// This instance manages token acquisition and caching for the entire app.
 const msalInstance = new PublicClientApplication(msalConfig);
 
-const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement);
-root.render(
-  <React.StrictMode>
-    <MsalProvider instance={msalInstance}>
-      <App />
-    </MsalProvider>
-  </React.StrictMode>
-);
+// initialize() must be awaited before rendering. It is an async operation that:
+//   1. Restores any cached account state from sessionStorage.
+//   2. Processes the redirect response in the URL (the ?code=... returned by
+//      Azure AD after the user authenticates).
+//   3. Exchanges the authorisation code for tokens and writes them to the cache.
+//
+// Only once initialize() resolves is authentication state reliable for any
+// component in the tree. Passing the instance to MsalProvider before this
+// completes means useIsAuthenticated() has no stable state to read from.
+msalInstance.initialize().then(() => {
+  const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement);
+  root.render(
+    <React.StrictMode>
+      <MsalProvider instance={msalInstance}>
+        <App />
+      </MsalProvider>
+    </React.StrictMode>
+  );
+});
 ```
 
 **`src/hooks/useApiToken.ts`** — acquire a token for backend API calls
@@ -430,22 +441,18 @@ interface AuthGuardProps {
 // Wraps any component that requires authentication.
 // Redirects unauthenticated users to the Microsoft login page.
 //
-// IMPORTANT: loginRedirect must only be called when inProgress === InteractionStatus.None.
-// After Azure AD redirects back to the app with an authorisation code, MSAL needs a brief
-// window to process that redirect and exchange the code for tokens. During this window,
-// useIsAuthenticated() still returns false. Calling loginRedirect() during this processing
-// window causes an infinite redirect loop: MSAL never finishes handling the first redirect
-// because a new one is immediately triggered.
-//
-// Checking inProgress prevents the redirect from firing while MSAL is mid-interaction
-// (InteractionStatus.HandleRedirect), ensuring MSAL completes token acquisition before
-// AuthGuard evaluates authentication state.
+// loginRedirect is only called when inProgress === InteractionStatus.None.
+// This guards against state changes during active MSAL interactions — for example,
+// when acquireTokenSilent falls back to a redirect, or during logoutRedirect.
+// In those cases, useIsAuthenticated() may not yet reflect the final state.
+// Waiting for InteractionStatus.None ensures the guard only evaluates
+// stable, settled authentication state.
 export function AuthGuard({ children }: AuthGuardProps) {
   const isAuthenticated = useIsAuthenticated();
   const { instance, inProgress } = useMsal();
 
-  // MSAL is still processing a redirect (e.g. handling the auth code returned by Azure AD).
-  // Do NOT trigger another loginRedirect — wait for MSAL to finish and update auth state.
+  // An MSAL interaction is in progress — authentication state is not yet settled.
+  // Wait for it to complete before evaluating or triggering any redirect.
   if (inProgress !== InteractionStatus.None) {
     return <div>Loading...</div>;
   }
