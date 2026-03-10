@@ -420,6 +420,7 @@ export function useAgentApi() {
 
 ```typescript
 import { useIsAuthenticated, useMsal } from "@azure/msal-react";
+import { InteractionStatus } from "@azure/msal-browser";
 import { loginRequest } from "../authConfig";
 
 interface AuthGuardProps {
@@ -428,12 +429,29 @@ interface AuthGuardProps {
 
 // Wraps any component that requires authentication.
 // Redirects unauthenticated users to the Microsoft login page.
+//
+// IMPORTANT: loginRedirect must only be called when inProgress === InteractionStatus.None.
+// After Azure AD redirects back to the app with an authorisation code, MSAL needs a brief
+// window to process that redirect and exchange the code for tokens. During this window,
+// useIsAuthenticated() still returns false. Calling loginRedirect() during this processing
+// window causes an infinite redirect loop: MSAL never finishes handling the first redirect
+// because a new one is immediately triggered.
+//
+// Checking inProgress prevents the redirect from firing while MSAL is mid-interaction
+// (InteractionStatus.HandleRedirect), ensuring MSAL completes token acquisition before
+// AuthGuard evaluates authentication state.
 export function AuthGuard({ children }: AuthGuardProps) {
   const isAuthenticated = useIsAuthenticated();
-  const { instance } = useMsal();
+  const { instance, inProgress } = useMsal();
 
+  // MSAL is still processing a redirect (e.g. handling the auth code returned by Azure AD).
+  // Do NOT trigger another loginRedirect — wait for MSAL to finish and update auth state.
+  if (inProgress !== InteractionStatus.None) {
+    return <div>Loading...</div>;
+  }
+
+  // MSAL is idle and user is not authenticated — safe to initiate login redirect.
   if (!isAuthenticated) {
-    // Trigger login redirect — user returns to redirectUri after authentication
     instance.loginRedirect(loginRequest);
     return <div>Redirecting to sign-in...</div>;
   }
