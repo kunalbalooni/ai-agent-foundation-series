@@ -88,7 +88,7 @@ The access token is a JWT. After validation, the backend can read:
   "groups": ["group-id-1", "group-id-2"],
   "scp": "agent.query",
   "aud": "api://<backend-client-id>",
-  "iss": "https://sts.windows.net/<tenant-id>/",
+  "iss": "https://login.microsoftonline.com/<tenant-id>/v2.0",
   "exp": 1710000000
 }
 ```
@@ -482,8 +482,7 @@ pip install python-jose[cryptography] httpx
 ```python
 import os
 import httpx
-from functools import lru_cache
-from typing import Optional
+import asyncio
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -493,8 +492,9 @@ from pydantic import BaseModel
 TENANT_ID = os.environ["AZURE_AD_TENANT_ID"]
 BACKEND_CLIENT_ID = os.environ["AZURE_AD_CLIENT_ID"]  # Backend API client ID
 
-# Token issuer — must match exactly what Entra ID puts in the 'iss' claim
-ISSUER = f"https://sts.windows.net/{TENANT_ID}/"
+# Token issuer — must match exactly what Entra ID puts in the 'iss' claim.
+# MSAL v3 requests tokens from the v2.0 endpoint, which sets iss to this format.
+ISSUER = f"https://login.microsoftonline.com/{TENANT_ID}/v2.0"
 
 # JWKS endpoint — Entra ID's public keys for token signature verification
 JWKS_URL = f"https://login.microsoftonline.com/{TENANT_ID}/discovery/v2.0/keys"
@@ -512,20 +512,30 @@ class CurrentUser(BaseModel):
     scopes: list[str]        # API scopes granted in this token (e.g. ["agent.query"])
 
 
-@lru_cache(maxsize=1)
-def _get_jwks() -> dict:
-    """Fetch and cache JWKS (public keys) from Entra ID.
+# Module-level JWKS cache (populated on first request, shared across all requests)
+_jwks_cache: dict | None = None
 
-    Cached to avoid fetching keys on every request.
-    In production, implement cache invalidation with a TTL.
-    Keys change infrequently but the cache should be refreshable.
-    """
+
+def _fetch_jwks_sync() -> dict:
+    """Synchronous JWKS fetch — run in a thread pool to avoid blocking the event loop."""
     response = httpx.get(JWKS_URL, timeout=10)
     response.raise_for_status()
     return response.json()
 
 
-def _validate_token(token: str) -> dict:
+async def _get_jwks() -> dict:
+    """Return cached JWKS, fetching from Entra ID on first call.
+
+    Uses asyncio.to_thread so the blocking httpx.get runs in a thread pool
+    and does not block the async event loop.
+    """
+    global _jwks_cache
+    if _jwks_cache is None:
+        _jwks_cache = await asyncio.to_thread(_fetch_jwks_sync)
+    return _jwks_cache
+
+
+async def _validate_token(token: str) -> dict:
     """Validate a JWT access token issued by Entra ID.
 
     Performs full validation:
@@ -538,7 +548,7 @@ def _validate_token(token: str) -> dict:
     Raises HTTPException 401 on any validation failure.
     """
     try:
-        jwks = _get_jwks()
+        jwks = await _get_jwks()
 
         # Decode and validate the token
         # python-jose verifies signature, issuer, audience, and expiry automatically
@@ -560,7 +570,7 @@ def _validate_token(token: str) -> dict:
         )
 
 
-def get_current_user(
+async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
 ) -> CurrentUser:
     """FastAPI dependency that validates the bearer token and returns the current user.
@@ -573,7 +583,7 @@ def get_current_user(
     Every protected endpoint receives a fully validated CurrentUser.
     If the token is invalid or absent, FastAPI returns 401 before the handler runs.
     """
-    claims = _validate_token(credentials.credentials)
+    claims = await _validate_token(credentials.credentials)
 
     # Extract claims — use .get() with defaults to handle optional claims gracefully
     return CurrentUser(
@@ -826,7 +836,7 @@ Or via the portal: **API permissions** → **Grant admin consent for \<organisat
 
 **Cause:** The JWKS cache contains stale keys (rare, but happens after key rotation).
 
-**Fix:** Clear the `lru_cache` on `_get_jwks()` by restarting the backend, or implement a TTL-based cache refresh.
+**Fix:** Restart the backend to clear the module-level `_jwks_cache`, or implement a TTL-based cache refresh that sets `_jwks_cache = None` on a schedule.
 
 ---
 
