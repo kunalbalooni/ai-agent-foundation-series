@@ -46,7 +46,7 @@ A common mistake is registering a single application for both the frontend and b
 │  App Registration 2: agent-spa                                  │
 │  - Platform: Single-page application                            │
 │  - Redirect URIs: https://your-app.azurecontainerapps.io        │
-│  - Delegated permissions: User.Read, GroupMember.Read.All       │
+│  - Delegated permissions: User.Read                             │
 │  - Exposes NO scopes (requests them from agent-api)             │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -232,30 +232,57 @@ This step must be done in the portal — the Azure CLI does not support SPA plat
 
 1. Click **API permissions** → **Add a permission**
 2. Select **Microsoft Graph** → **Delegated permissions**
-3. Add the following permissions:
-   - `User.Read` — read the signed-in user's profile (no admin consent required)
-   - `Directory.Read.All` — read directory data (requires admin consent)
-   - `GroupMember.Read.All` — read group memberships (requires admin consent)
+3. Add **only** the following permission:
+   - `User.Read` — sign in and read the signed-in user's profile ([AdminConsentRequired: No](https://learn.microsoft.com/en-us/graph/permissions-reference#userread))
 4. Click **Add permissions**
 5. Click **Add a permission** again → **My APIs** → Select `agent-api`
 6. Add `agent.query` (and `agent.admin` if needed)
 7. Click **Add permissions**
 
-#### Grant Admin Consent
+> **Why only `User.Read`?**
+>
+> In this guide's architecture, group memberships are delivered as a `groups` claim directly inside the JWT access token — no Graph API call is needed at runtime. Groups arrive in the token because the `agent-api` backend registration is configured to include them (see [Configure groups optional claims](https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims?tabs=appui#configuring-groups-optional-claims) and the Troubleshooting section below). Because groups arrive in the token, the SPA never needs to call the Graph API to discover them, and `User.Read` ([AdminConsentRequired: No](https://learn.microsoft.com/en-us/graph/permissions-reference#userread)) is sufficient for sign-in.
+>
+> With `User.Read` only, no admin consent is required. Users can log in immediately without an administrator needing to pre-approve the application for the organisation.
 
-The `Directory.Read.All` and `GroupMember.Read.All` permissions require an administrator to grant consent on behalf of the organisation. Without this, every user sees a consent screen on first login.
+#### When to add `GroupMember.Read.All`
 
-```bash
-# Grant admin consent via URL (open in browser, signed in as admin)
-# Replace <tenant-id> and <frontend-client-id>
-https://login.microsoftonline.com/<tenant-id>/adminconsent?client_id=<frontend-client-id>
-```
+Add this permission — and go through the admin consent steps below — if any of the following apply:
 
-Or via the portal:
+- **Users belong to more than 200 groups.** Entra ID silently drops the `groups` claim from the JWT when the count exceeds 200 and replaces it with an `_claim_names` hint. Your backend must then call the Graph API (`GET /me/memberOf`) to retrieve memberships. See [Groups overage claim](https://learn.microsoft.com/en-us/entra/identity-platform/access-token-claims-reference#groups-overage-claim).
+- **You need real-time group membership** on every request rather than membership at the point the token was issued. A JWT `groups` claim reflects membership when the token was minted, not necessarily today. If a user's group membership changes and their token has not yet expired, the stale claim will be used until the next sign-in or token refresh.
+- **You are calling the Microsoft Graph API directly** from the frontend (e.g., to display the user's group names rather than just object IDs).
+
+`GroupMember.Read.All` is a delegated permission — [AdminConsentRequired: Yes](https://learn.microsoft.com/en-us/graph/permissions-reference#groupmemberreadall) for both delegated and application types.
+
+#### When to add `Directory.Read.All`
+
+Avoid this permission unless you have a specific requirement that `GroupMember.Read.All` cannot satisfy. Microsoft explicitly warns: *"Directory permissions grant broad access to directory resources such as users, groups, and devices in an organisation. Whenever possible, choose permissions specific to these resources and avoid using directory permissions. Directory permissions might be deprecated in the future."* ([Microsoft Graph permissions reference — Directory.Read.All](https://learn.microsoft.com/en-us/graph/permissions-reference#directoryreadall))
+
+Add `Directory.Read.All` only if you need to read directory data beyond group memberships — for example, reading organisational unit structure, device objects, or service principals. It is not required for the pattern in this guide.
+
+#### Admin consent steps (required for `GroupMember.Read.All` and `Directory.Read.All`)
+
+If you add either of these permissions, a tenant administrator must grant consent before users can log in. Without admin consent, every user sees an "Approval required" screen that they cannot bypass.
+
+**Option 1 — Via the Azure Portal:**
 1. **API permissions** → **Grant admin consent for \<organisation\>**
 2. Confirm by clicking **Yes**
+3. All registered permissions will show a green ✅ **Granted for \<organisation\>** status
 
-> **Important:** The login request in the SPA should only include Microsoft Graph permissions and the backend API scope. Do not add backend scopes to the Graph permission request — keep them separate. The SPA requests Graph permissions at login and the backend API scope when acquiring a token for API calls.
+**Option 2 — Via admin consent URL (share with administrator):**
+```
+https://login.microsoftonline.com/<tenant-id>/adminconsent?client_id=<spa-client-id>
+```
+The administrator opens this URL in a browser while signed in as a Global Administrator or Cloud Application Administrator, reviews the requested permissions, and clicks **Accept**.
+
+> **Who can grant admin consent?** The [Cloud Application Administrator](https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/permissions-reference#cloud-application-administrator) role is the minimum required — it does not need a Global Administrator. See [Grant tenant-wide admin consent](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/grant-admin-consent) for full requirements.
+
+> **⚠️ Portal and code must be updated together**
+>
+> If you remove a permission from the Azure portal but leave it in `loginRequest.scopes` in `authConfig.ts`, Entra ID will reject the entire auth request with `AADSTS70011: The scope <permission> is not valid` — blocking login completely. The reverse is also true: adding a scope to `loginRequest.scopes` that is not registered in the portal produces the same error. Always keep the portal permissions and the frontend scope list in sync. See [Requesting permissions through consent](https://learn.microsoft.com/en-us/entra/identity-platform/v2-permissions-and-consent) for how Entra ID validates scope requests.
+
+> **Note:** The login request in the SPA should only include Microsoft Graph permissions. Do not add backend API scopes to the login request — keep them separate. The SPA requests `User.Read` at login and the backend API scope (`api://<BACKEND_CLIENT_ID>/agent.query`) separately when acquiring a token for API calls.
 
 ---
 
@@ -306,12 +333,16 @@ export const msalConfig: Configuration = {
   },
 };
 
-// Scopes for the login request — Microsoft Graph only
-// Do NOT include backend API scopes here
+// Scopes for the login request — Microsoft Graph only.
+// User.Read is the minimum required for sign-in (AdminConsentRequired: No).
+// Add "GroupMember.Read.All" here only if your use case requires real-time group
+// membership resolution via Graph API (see Step 2 for when this applies).
+// If you add a scope here, it must also be registered in the portal under API permissions —
+// mismatches cause AADSTS70011 and block login entirely.
+// Reference: https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-single-page-app-react-sign-in
 export const loginRequest: PopupRequest = {
   scopes: [
     "User.Read",
-    "GroupMember.Read.All",
   ],
 };
 
@@ -812,15 +843,37 @@ az ad group member check \
 
 ## Troubleshooting
 
-### User sees admin consent screen on login
+### User sees "Approval required" / admin consent screen on login
 
-**Cause:** `Directory.Read.All` or `GroupMember.Read.All` has not been admin-consented for the organisation.
+**Cause:** The app registration has `GroupMember.Read.All` or `Directory.Read.All` in its API permissions, but an administrator has not yet granted tenant-wide consent for those permissions. These permissions have `AdminConsentRequired: Yes` — users cannot consent to them individually ([Microsoft Graph permissions reference](https://learn.microsoft.com/en-us/graph/permissions-reference#groupmemberreadall)).
 
-**Fix:** An administrator must grant consent:
+> **If you are using the minimal `User.Read`-only configuration in this guide**, this error should not occur. `User.Read` has `AdminConsentRequired: No` and does not require admin consent. If you are seeing this screen, check whether `GroupMember.Read.All` or `Directory.Read.All` was added to the app's API permissions in the portal.
+
+**Fix:** A tenant administrator must grant consent. See the [admin consent steps in Step 2](#admin-consent-steps-required-for-groupmemberreadall-and-directoryreadall) for full instructions. The two options are:
+
+**Option 1 — Via the Azure Portal:**
+1. Navigate to **Azure Portal** → **Microsoft Entra ID** → **App registrations** → `agent-spa`
+2. Click **API permissions** → **Grant admin consent for \<organisation\>**
+3. Confirm by clicking **Yes**
+
+**Option 2 — Via admin consent URL:**
 ```
 https://login.microsoftonline.com/<tenant-id>/adminconsent?client_id=<spa-client-id>
 ```
-Or via the portal: **API permissions** → **Grant admin consent for \<organisation\>**
+Share this URL with a [Cloud Application Administrator](https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/permissions-reference#cloud-application-administrator) or Global Administrator. They open it in a browser, review the permissions, and click **Accept**. See [Grant tenant-wide admin consent](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/grant-admin-consent) for full requirements.
+
+---
+
+### Login fails with AADSTS70011 — "The provided value for scope is not valid"
+
+**Cause:** A scope listed in `loginRequest.scopes` in `authConfig.ts` is not registered as an API permission on the `agent-spa` app registration in the Azure portal — or vice versa: a permission was removed from the portal but not from the code. Entra ID validates every scope in the login request against the registered permissions and rejects the entire request if any scope is unrecognised ([Requesting permissions through consent](https://learn.microsoft.com/en-us/entra/identity-platform/v2-permissions-and-consent)).
+
+**Fix:** Ensure `loginRequest.scopes` in `authConfig.ts` exactly matches the delegated Graph permissions registered in the portal. The two must be updated together:
+
+1. Azure Portal → **App registrations** → `agent-spa` → **API permissions** — check the registered Graph permissions
+2. `authConfig.ts` → `loginRequest.scopes` — check the requested scopes match
+
+If you removed `GroupMember.Read.All` from the portal, remove `"GroupMember.Read.All"` from `loginRequest.scopes` in the same deployment. If you added it to the portal, add it to the code at the same time.
 
 ---
 
