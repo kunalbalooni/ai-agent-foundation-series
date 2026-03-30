@@ -241,48 +241,19 @@ This step must be done in the portal — the Azure CLI does not support SPA plat
 
 > **Why only `User.Read`?**
 >
-> In this guide's architecture, group memberships are delivered as a `groups` claim directly inside the JWT access token — no Graph API call is needed at runtime. Groups arrive in the token because the `agent-api` backend registration is configured to include them (see [Configure groups optional claims](https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims?tabs=appui#configuring-groups-optional-claims) and the Troubleshooting section below). Because groups arrive in the token, the SPA never needs to call the Graph API to discover them, and `User.Read` ([AdminConsentRequired: No](https://learn.microsoft.com/en-us/graph/permissions-reference#userread)) is sufficient for sign-in.
+> Group memberships are delivered as a `groups` claim directly inside the JWT access token — no Graph API call is needed at runtime. This is configured via **Token configuration → Add groups claim** on the `agent-api` registration (see [Configure groups optional claims](https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims?tabs=appui#configuring-groups-optional-claims) and the Troubleshooting section). Because groups arrive in the token, the SPA never needs to query the Graph API for them, and `User.Read` ([AdminConsentRequired: No](https://learn.microsoft.com/en-us/graph/permissions-reference#userread)) is sufficient for sign-in.
+
+> **Why is `agent.query` registered here?**
 >
-> With `User.Read` only, no admin consent is required. Users can log in immediately without an administrator needing to pre-approve the application for the organisation.
-
-#### When to add `GroupMember.Read.All`
-
-Add this permission — and go through the admin consent steps below — if any of the following apply:
-
-- **Users belong to more than 200 groups.** Entra ID silently drops the `groups` claim from the JWT when the count exceeds 200 and replaces it with an `_claim_names` hint. Your backend must then call the Graph API (`GET /me/memberOf`) to retrieve memberships. See [Groups overage claim](https://learn.microsoft.com/en-us/entra/identity-platform/access-token-claims-reference#groups-overage-claim).
-- **You need real-time group membership** on every request rather than membership at the point the token was issued. A JWT `groups` claim reflects membership when the token was minted, not necessarily today. If a user's group membership changes and their token has not yet expired, the stale claim will be used until the next sign-in or token refresh.
-- **You are calling the Microsoft Graph API directly** from the frontend (e.g., to display the user's group names rather than just object IDs).
-
-`GroupMember.Read.All` is a delegated permission — [AdminConsentRequired: Yes](https://learn.microsoft.com/en-us/graph/permissions-reference#groupmemberreadall) for both delegated and application types.
-
-#### When to add `Directory.Read.All`
-
-Avoid this permission unless you have a specific requirement that `GroupMember.Read.All` cannot satisfy. Microsoft explicitly warns: *"Directory permissions grant broad access to directory resources such as users, groups, and devices in an organisation. Whenever possible, choose permissions specific to these resources and avoid using directory permissions. Directory permissions might be deprecated in the future."* ([Microsoft Graph permissions reference — Directory.Read.All](https://learn.microsoft.com/en-us/graph/permissions-reference#directoryreadall))
-
-Add `Directory.Read.All` only if you need to read directory data beyond group memberships — for example, reading organisational unit structure, device objects, or service principals. It is not required for the pattern in this guide.
-
-#### Admin consent steps (required for `GroupMember.Read.All` and `Directory.Read.All`)
-
-If you add either of these permissions, a tenant administrator must grant consent before users can log in. Without admin consent, every user sees an "Approval required" screen that they cannot bypass.
-
-**Option 1 — Via the Azure Portal:**
-1. **API permissions** → **Grant admin consent for \<organisation\>**
-2. Confirm by clicking **Yes**
-3. All registered permissions will show a green ✅ **Granted for \<organisation\>** status
-
-**Option 2 — Via admin consent URL (share with administrator):**
-```
-https://login.microsoftonline.com/<tenant-id>/adminconsent?client_id=<spa-client-id>
-```
-The administrator opens this URL in a browser while signed in as a Global Administrator or Cloud Application Administrator, reviews the requested permissions, and clicks **Accept**.
-
-> **Who can grant admin consent?** The [Cloud Application Administrator](https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/permissions-reference#cloud-application-administrator) role is the minimum required — it does not need a Global Administrator. See [Grant tenant-wide admin consent](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/grant-admin-consent) for full requirements.
+> `agent.query` is a custom scope exposed by `agent-api` (configured in Step 1). Registering it under `agent-spa`'s API permissions tells Entra ID that `agent-spa` is authorised to acquire tokens scoped to `agent-api` on behalf of the user. See [Configure an app to expose a web API](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-configure-app-expose-web-apis). Even though `agent.query` is set to "Admins and users" consent in Step 1, whether users can consent individually depends on the tenant's user consent policy — many enterprise tenants restrict this. Granting admin consent for `agent-spa` (which includes `agent.query` as a declared dependency) ensures a clean first-login experience regardless of the tenant's consent settings. See [Configure user consent](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/configure-user-consent).
 
 > **⚠️ Portal and code must be updated together**
 >
-> If you remove a permission from the Azure portal but leave it in `loginRequest.scopes` in `authConfig.ts`, Entra ID will reject the entire auth request with `AADSTS70011: The scope <permission> is not valid` — blocking login completely. The reverse is also true: adding a scope to `loginRequest.scopes` that is not registered in the portal produces the same error. Always keep the portal permissions and the frontend scope list in sync. See [Requesting permissions through consent](https://learn.microsoft.com/en-us/entra/identity-platform/v2-permissions-and-consent) for how Entra ID validates scope requests.
+> If you remove a permission from the Azure portal but leave it in `loginRequest.scopes` in `authConfig.ts`, Entra ID rejects the entire auth request with `AADSTS70011: The scope <permission> is not valid` — blocking login completely. The reverse is also true. Always keep portal permissions and `loginRequest.scopes` in sync. See [Permissions and consent in the Microsoft identity platform](https://learn.microsoft.com/en-us/entra/identity-platform/v2-permissions-and-consent).
 
-> **Note:** The login request in the SPA should only include Microsoft Graph permissions. Do not add backend API scopes to the login request — keep them separate. The SPA requests `User.Read` at login and the backend API scope (`api://<BACKEND_CLIENT_ID>/agent.query`) separately when acquiring a token for API calls.
+> **Note:** `loginRequest.scopes` should only contain Microsoft Graph permissions (`User.Read`). Do not include backend API scopes here — those are requested separately via `acquireTokenSilent` when calling the backend.
+
+For multi-tenant deployments or scenarios requiring additional Graph permissions (`GroupMember.Read.All`, `Directory.Read.All`), see the [Permission Configurations Reference](#permission-configurations-reference) section below.
 
 ---
 
@@ -841,6 +812,192 @@ az ad group member check \
 
 ---
 
+## Permission Configurations Reference
+
+Steps 1–8 implement the **single-tenant minimal configuration** — the right starting point for most deployments. This section covers what changes and why for multi-tenant deployments and scenarios requiring additional Graph permissions.
+
+---
+
+### A — Single-Tenant (Default)
+
+Use this configuration when all users are in the same Azure AD tenant as the app registrations.
+
+| Registration | Setting | Value |
+|---|---|---|
+| `agent-api` | Sign-in audience | `AzureADMyOrg` |
+| `agent-spa` | Sign-in audience | `AzureADMyOrg` |
+| `agent-spa` | Graph permissions | `User.Read` only |
+| `agent-spa` | Custom API permissions | `agent.query` (+ `agent.admin` if needed) |
+| Backend `auth.py` | JWKS URL | `https://login.microsoftonline.com/<tenant-id>/discovery/v2.0/keys` |
+| Backend `auth.py` | Issuer | `https://login.microsoftonline.com/<tenant-id>/v2.0` |
+
+#### Admin consent for `agent.query` (recommended)
+
+`agent.query` is a custom scope with "Who can consent: Admins and users". Whether users can consent individually at first login depends on the tenant's [user consent policy](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/configure-user-consent) — many enterprise tenants restrict or disable user consent entirely. Granting admin consent upfront ensures a clean first-login experience for all users regardless of tenant policy, and is the recommended approach.
+
+**Via the Azure Portal:**
+1. Azure Portal → **App registrations** → `agent-spa` → **API permissions**
+2. Click **Grant admin consent for \<organisation\>** → **Yes**
+3. All permissions show ✅ **Granted for \<organisation\>**
+
+**Via admin consent URL** (share with a [Cloud Application Administrator](https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/permissions-reference#cloud-application-administrator) or Global Administrator):
+```
+https://login.microsoftonline.com/<your-tenant-id>/adminconsent?client_id=<agent-spa-client-id>
+```
+The administrator opens this URL, reviews the permissions, and clicks **Accept**. See [Grant tenant-wide admin consent](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/grant-admin-consent) for role requirements.
+
+No changes to `authConfig.ts` or backend code are required for single-tenant.
+
+---
+
+### B — Multi-Tenant
+
+Use this configuration when users from external organisations (different Azure AD tenants) need to access the agent. Examples: a SaaS product, a shared service sold to client organisations, or a tool used by a partner company.
+
+#### Why admin consent is required for every client tenant
+
+When `agent-spa` is consented in a client tenant, Entra ID provisions **service principals** for both `agent-spa` and `agent-api` in that tenant's directory in a single step. This is because `agent-spa` declares `agent.query` (on `agent-api`) as a dependency in its API permissions. Without this provisioning, Entra ID cannot issue tokens for `agent-api` to users from that tenant — resulting in error `AADSTS650052`. See [Understand user and admin consent](https://learn.microsoft.com/en-us/entra/identity-platform/howto-convert-app-to-be-multi-tenant#understand-user-and-admin-consent).
+
+#### Step B-1 — Make `agent-api` multi-tenant (do this first)
+
+In the Azure Portal (in the tenant where `agent-api` is registered):
+
+1. Navigate to **App registrations** → `agent-api` → **Manifest**
+2. Change `"signInAudience"` from `"AzureADMyOrg"` to `"AzureADMultipleOrgs"`
+3. Click **Save**
+
+Repeat for `agent-spa`.
+
+See [How to convert an app to be multi-tenant](https://learn.microsoft.com/en-us/entra/identity-platform/howto-convert-app-to-be-multi-tenant) for the full Microsoft guidance on multi-tenant app patterns.
+
+#### Step B-2 — Admin consent URL (share with each client tenant's administrator)
+
+A [Cloud Application Administrator](https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/permissions-reference#cloud-application-administrator) or Global Administrator in the **client tenant** must open this URL and click **Accept**:
+
+```
+https://login.microsoftonline.com/<client-tenant-id>/adminconsent?client_id=<agent-spa-client-id>
+```
+
+This provisions service principals for both `agent-spa` and `agent-api` in the client tenant simultaneously. It must be done once per client tenant. See [Grant tenant-wide admin consent](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/grant-admin-consent).
+
+#### Step B-3 — Update backend JWT validation for multi-tenant tokens
+
+Single-tenant validation checks the `iss` claim against one hardcoded issuer. In multi-tenant, each client tenant produces tokens with a different issuer (`https://login.microsoftonline.com/<their-tenant-id>/v2.0`). The backend must use the `common` JWKS endpoint and validate the `tid` (tenant ID) claim against an explicit allowlist instead.
+
+See [Validate tokens — multi-tenant apps](https://learn.microsoft.com/en-us/entra/identity-platform/access-tokens#validate-tokens) and [Access token claims reference — `tid`](https://learn.microsoft.com/en-us/entra/identity-platform/access-token-claims-reference#payload-claims).
+
+Replace the issuer and JWKS constants in `api/auth.py` and update `_validate_token`:
+
+```python
+# Multi-tenant: use the common endpoint for JWKS
+JWKS_URL = "https://login.microsoftonline.com/common/discovery/v2.0/keys"
+
+# Allowlist of permitted tenant IDs (comma-separated in environment variable)
+# Include your own tenant ID plus each client tenant ID
+ALLOWED_TENANT_IDS = set(os.environ["ALLOWED_TENANT_IDS"].split(","))
+
+
+async def _validate_token(token: str) -> dict:
+    """Validate a JWT access token — multi-tenant variant.
+
+    Signature, audience, and expiry are verified by python-jose.
+    Issuer is not checked by the library (varies per tenant); instead
+    the tid claim is validated against the ALLOWED_TENANT_IDS allowlist.
+    """
+    try:
+        jwks = await _get_jwks()
+        claims = jwt.decode(
+            token,
+            jwks,
+            algorithms=["RS256"],
+            audience=BACKEND_CLIENT_ID,
+            options={
+                "verify_at_hash": False,
+                "verify_iss": False,   # Issuer varies per tenant — validated manually below
+            },
+        )
+        # Validate tenant ID against the allowlist
+        token_tid = claims.get("tid", "")
+        if token_tid not in ALLOWED_TENANT_IDS:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Token issued by untrusted tenant: {token_tid}",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return claims
+
+    except JWTError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Token validation failed: {str(e)}",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+```
+
+Add `ALLOWED_TENANT_IDS` to your backend environment variables:
+
+```bash
+# Comma-separated list of Azure AD tenant IDs permitted to call this API
+# Include your own tenant and each onboarded client tenant
+ALLOWED_TENANT_IDS=<your-own-tenant-id>,<client-tenant-id-1>,<client-tenant-id-2>
+```
+
+> **Security note:** The `ALLOWED_TENANT_IDS` allowlist is defence in depth — it ensures that even if a service principal is provisioned in an unintended tenant, that tenant's tokens cannot reach the backend. Always add client tenants explicitly; never use a wildcard.
+
+---
+
+### C — Additional Graph Permissions
+
+The default `User.Read` permission is sufficient when group memberships are delivered as JWT claims (the pattern in this guide). Add Graph permissions only when you have a specific requirement that token claims cannot satisfy.
+
+> **⚠️ If you add a permission to the portal, add it to `loginRequest.scopes` in `authConfig.ts` in the same deployment, and vice versa.** Mismatches cause `AADSTS70011` and block login entirely. See [Permissions and consent](https://learn.microsoft.com/en-us/entra/identity-platform/v2-permissions-and-consent).
+
+#### `GroupMember.Read.All` — when to add it
+
+[AdminConsentRequired: Yes](https://learn.microsoft.com/en-us/graph/permissions-reference#groupmemberreadall). Grants the app the ability to list group memberships for the signed-in user via the Graph API.
+
+Add this permission if any of the following apply:
+
+- **Users belong to more than 200 groups.** Entra ID silently drops the `groups` JWT claim when the count exceeds 200 and replaces it with an `_claim_names` hint. The backend must then call `GET /me/memberOf` to retrieve memberships. See [Groups overage claim](https://learn.microsoft.com/en-us/entra/identity-platform/access-token-claims-reference#groups-overage-claim).
+- **You need real-time group membership.** JWT `groups` claims reflect membership at token issuance. If a user's group membership changes before their token expires, the stale claim is used. Call the Graph API if you require membership checked at request time.
+- **You are displaying group names in the frontend.** JWT claims contain group object IDs only. If the UI needs human-readable group names, you must call the Graph API.
+
+**Portal steps:**
+1. `agent-spa` → **API permissions** → **Add a permission** → **Microsoft Graph** → **Delegated** → `GroupMember.Read.All`
+2. Click **Add permissions**
+3. Grant admin consent (see below)
+
+**`authConfig.ts` — add to `loginRequest.scopes`:**
+```typescript
+export const loginRequest: PopupRequest = {
+  scopes: ["User.Read", "GroupMember.Read.All"],
+};
+```
+
+#### `Directory.Read.All` — when to add it
+
+[AdminConsentRequired: Yes](https://learn.microsoft.com/en-us/graph/permissions-reference#directoryreadall). Grants broad read access to the entire directory.
+
+> **Microsoft's guidance:** *"Directory permissions grant broad access to directory resources such as users, groups, and devices in an organisation. Whenever possible, choose permissions specific to these resources and avoid using directory permissions. Directory permissions might be deprecated in the future."* ([Microsoft Graph permissions reference](https://learn.microsoft.com/en-us/graph/permissions-reference#directoryreadall))
+
+Add `Directory.Read.All` only if you need to read directory data that `GroupMember.Read.All` cannot provide — for example, reading organisational unit structure, device objects, or service principal metadata. It is not required for user authentication or group-based access control.
+
+#### Admin consent steps for elevated permissions
+
+Both `GroupMember.Read.All` and `Directory.Read.All` have `AdminConsentRequired: Yes`. Users cannot consent to them individually — an administrator must grant consent before any user can log in.
+
+**Option 1 — Via the Azure Portal:**
+1. `agent-spa` → **API permissions** → **Grant admin consent for \<organisation\>** → **Yes**
+2. All permissions show ✅ **Granted for \<organisation\>**
+
+**Option 2 — Via admin consent URL:**
+```
+https://login.microsoftonline.com/<tenant-id>/adminconsent?client_id=<agent-spa-client-id>
+```
+Share with a [Cloud Application Administrator](https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/permissions-reference#cloud-application-administrator) or Global Administrator. They open the URL, review the requested permissions, and click **Accept**. See [Grant tenant-wide admin consent](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/grant-admin-consent).
+
+---
+
 ## Troubleshooting
 
 ### User sees "Approval required" / admin consent screen on login
@@ -921,6 +1078,36 @@ If you removed `GroupMember.Read.All` from the portal, remove `"GroupMember.Read
 
 ---
 
+### Backend returns 401 — token from users in a different organisation is rejected
+
+**Cause:** The backend `_validate_token` function is checking the `iss` claim against a single hardcoded tenant issuer. Tokens from users in other Azure AD tenants have a different `iss` value (`https://login.microsoftonline.com/<their-tenant-id>/v2.0`) and fail issuer validation.
+
+**Fix:** Follow [Section B — Multi-Tenant](#b--multi-tenant) in the Permission Configurations Reference: switch the JWKS endpoint to `common`, disable `verify_iss` in python-jose, and validate the `tid` claim against `ALLOWED_TENANT_IDS`.
+
+---
+
+### Login fails with AADSTS650052 — "Organisation lacks a service principal for this app"
+
+```
+AADSTS650052: The app is trying to access a service '<app-id>' that your organization
+'<tenant-id>' lacks a service principal for.
+```
+
+**Cause:** The user is signing in from a different Azure AD tenant than the one where `agent-api` (or `agent-spa`) is registered. Entra ID cannot issue tokens for `agent-api` to users from a tenant where no service principal for `agent-api` exists. This error typically appears when:
+- The app registrations use `AzureADMyOrg` (single-tenant) and a user from another tenant tries to log in, or
+- The app registrations have been changed to `AzureADMultipleOrgs` (multi-tenant) but admin consent has not yet been granted in the user's tenant — meaning the service principal was never provisioned there
+
+**Why this happened after removing admin consent:** When `GroupMember.Read.All` was registered and admin consent was granted via the `adminconsent` URL, Entra ID provisioned service principals for both `agent-spa` and `agent-api` in the client tenant as part of that consent flow. Removing the high-privilege permissions removed the consent step, which removed the service principal provisioning as a side effect. The permissions themselves were not the cause — the consent action was.
+
+**Fix:** Follow [Section B — Multi-Tenant](#b--multi-tenant) in the Permission Configurations Reference. The steps are:
+1. Change both registrations to `AzureADMultipleOrgs` in the Manifest
+2. Have a Cloud Application Administrator in the client tenant open the admin consent URL for `agent-spa` — this provisions service principals for both apps in one step
+3. Update the backend to use the `common` JWKS endpoint and `ALLOWED_TENANT_IDS` validation
+
+See [AADSTS error codes reference](https://learn.microsoft.com/en-us/entra/identity-platform/reference-error-codes#aadsts-error-codes) and [Understand user and admin consent](https://learn.microsoft.com/en-us/entra/identity-platform/howto-convert-app-to-be-multi-tenant#understand-user-and-admin-consent).
+
+---
+
 ### Wrong Client ID on Container App
 
 **Cause:** The environment variable on the Container App has not been updated after a new app registration was created.
@@ -968,7 +1155,10 @@ Refresh tokens expire after 24 hours of inactivity (by default) or 90 days maxim
 
 ### Guest User Access
 
-If your organisation uses B2B collaboration (guest users from external tenants), the `iss` claim in their tokens will differ from internal users. The current implementation validates against a single issuer. To support guest users, either use a multi-tenant app registration or validate against the `/common` endpoint and filter by accepted tenant IDs in application logic.
+If your organisation uses B2B collaboration (guest users from external tenants), their tokens carry an `iss` claim from their home tenant — different from your tenant's issuer. The single-tenant implementation in Steps 1–8 will reject those tokens.
+
+To support guest users, follow [Section B — Multi-Tenant](#b--multi-tenant) in the Permission Configurations Reference: change both registrations to `AzureADMultipleOrgs`, grant admin consent in the guest users' home tenant, and update the backend to use the `common` JWKS endpoint with an `ALLOWED_TENANT_IDS` allowlist. See [Azure AD B2B collaboration overview](https://learn.microsoft.com/en-us/entra/external-id/what-is-b2b) for the full Microsoft guidance on B2B access patterns.
+
 
 ### Universal Logout
 
