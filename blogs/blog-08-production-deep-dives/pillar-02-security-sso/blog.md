@@ -25,7 +25,7 @@ The failure mode is predictable: the agent is deployed, a URL is shared internal
 
 API keys are not a solution to this problem. An API key answers "is this a known caller?" — it does not answer "who is this person?", "what are they authorised to do?", or "should this specific request be allowed?". API keys are static, shared, and not tied to the organisation's identity lifecycle — when an employee leaves, their API key does not expire with their Entra ID account.
 
-SSO authentication with Azure AD solves the identity problem structurally: every request carries a short-lived, cryptographically signed token that identifies the user, their group memberships, and their organisational context. The token is issued by the organisation's identity provider and expires automatically. Revocation is instant — disable the account in Entra ID and all tokens issued to that account are immediately invalid.
+SSO authentication with Azure AD solves the identity problem structurally: every request carries a short-lived, cryptographically signed token that identifies the user, their group memberships, and their organisational context. The token is issued by the organisation's identity provider and expires automatically. With Continuous Access Evaluation (CAE) enabled, disabling an account in Entra ID revokes tokens in near real-time; without CAE, existing access tokens remain valid until they expire (up to one hour). See the [Universal Logout](#universal-logout) section for details.
 
 ---
 
@@ -83,7 +83,7 @@ The access token is a JWT. After validation, the backend can read:
 ```json
 {
   "oid": "user-object-id",
-  "upn": "user@organisation.com",
+  "preferred_username": "user@organisation.com",
   "name": "User Display Name",
   "groups": ["group-id-1", "group-id-2"],
   "scp": "agent.query",
@@ -92,6 +92,8 @@ The access token is a JWT. After validation, the backend can read:
   "exp": 1710000000
 }
 ```
+
+> **Note on `upn` vs `preferred_username`:** The v2.0 token endpoint uses `preferred_username` for the user's sign-in name. The older `upn` claim is a v1.0 endpoint claim. The backend code handles both — `claims.get("upn") or claims.get("preferred_username", "")` — for compatibility, but `preferred_username` is the correct v2.0 claim. See [Access token claims reference](https://learn.microsoft.com/en-us/entra/identity-platform/access-token-claims-reference#payload-claims).
 
 The `groups` claim contains the Entra ID object IDs of the security groups the user belongs to. This is the basis for access control decisions downstream.
 
@@ -220,13 +222,16 @@ This step must be done in the portal — the Azure CLI does not support SPA plat
 3. Click **Authentication** → **Add a platform** → **Single-page application**
 4. Add redirect URI: `https://<your-container-app-url>`
    - Also add `http://localhost:3000` for local development
-5. Under **Implicit grant and hybrid flows**, enable:
-   - ✅ **Access tokens**
-   - ✅ **ID tokens**
+5. Under **Implicit grant and hybrid flows**, leave both options **unchecked**:
+   - ☐ Access tokens
+   - ☐ ID tokens
 6. Click **Configure**
 
 > **Why Single-page application, not Web?**
 > The "Web" platform uses the Authorization Code Flow with a client secret — appropriate for server-side applications that can keep a secret. An SPA runs in the browser and cannot keep a secret. The SPA platform uses PKCE instead, which provides equivalent security without requiring a secret in client-side code.
+>
+> **Why leave implicit grant unchecked?**
+> Enabling implicit grant (Access tokens / ID tokens under Implicit grant) activates a legacy flow that Microsoft explicitly recommends against for new applications: *"We recommend that all new applications use the authorization code flow instead. Implicit grant is a legacy mechanism."* ([Microsoft identity platform — Implicit grant flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-implicit-grant-flow)). MSAL v2+ uses Authorization Code Flow with PKCE by default — the implicit grant checkboxes are not needed and should be left unchecked.
 
 #### Configure API Permissions
 
@@ -307,7 +312,7 @@ export const msalConfig: Configuration = {
 // Scopes for the login request — Microsoft Graph only.
 // User.Read is the minimum required for sign-in (AdminConsentRequired: No).
 // Add "GroupMember.Read.All" here only if your use case requires real-time group
-// membership resolution via Graph API (see Step 2 for when this applies).
+// membership resolution via Graph API (see Permission Configurations Reference for when this applies).
 // If you add a scope here, it must also be registered in the portal under API permissions —
 // mismatches cause AADSTS70011 and block login entirely.
 // Reference: https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-single-page-app-react-sign-in
@@ -508,7 +513,7 @@ bearer_scheme = HTTPBearer()
 class CurrentUser(BaseModel):
     """Typed representation of the authenticated user, extracted from the JWT."""
     object_id: str           # Entra ID user object ID (stable unique identifier)
-    upn: str                 # User principal name (email address)
+    upn: str                 # User principal name / preferred_username (email address)
     display_name: str        # Display name
     groups: list[str]        # List of group object IDs the user belongs to
     scopes: list[str]        # API scopes granted in this token (e.g. ["agent.query"])
@@ -543,8 +548,12 @@ async def _validate_token(token: str) -> dict:
     Performs full validation:
     - Signature verification using Entra ID public keys
     - Issuer check: must be this tenant's STS
-    - Audience check: must be this backend API's client ID
+    - Audience check: must match the Application ID URI of this backend API
     - Expiry check: token must not be expired
+
+    The audience for v2.0 access tokens is the Application ID URI
+    (api://<client-id>), not the bare client ID GUID.
+    See: https://learn.microsoft.com/en-us/entra/identity-platform/access-token-claims-reference#payload-claims
 
     Returns the decoded token claims on success.
     Raises HTTPException 401 on any validation failure.
@@ -552,13 +561,14 @@ async def _validate_token(token: str) -> dict:
     try:
         jwks = await _get_jwks()
 
-        # Decode and validate the token
-        # python-jose verifies signature, issuer, audience, and expiry automatically
+        # Decode and validate the token.
+        # python-jose verifies signature, issuer, audience, and expiry automatically.
+        # audience must be the Application ID URI, not the bare client ID.
         claims = jwt.decode(
             token,
             jwks,
             algorithms=["RS256"],
-            audience=BACKEND_CLIENT_ID,
+            audience=f"api://{BACKEND_CLIENT_ID}",
             issuer=ISSUER,
             options={"verify_at_hash": False},  # Not required for access tokens
         )
@@ -587,10 +597,12 @@ async def get_current_user(
     """
     claims = await _validate_token(credentials.credentials)
 
-    # Extract claims — use .get() with defaults to handle optional claims gracefully
+    # Extract claims — use .get() with defaults to handle optional claims gracefully.
+    # preferred_username is the v2.0 claim; upn is the v1.0 equivalent.
+    # Both are checked for compatibility across token endpoint versions.
     return CurrentUser(
         object_id=claims.get("oid", ""),
-        upn=claims.get("upn") or claims.get("preferred_username", ""),
+        upn=claims.get("preferred_username") or claims.get("upn", ""),
         display_name=claims.get("name", ""),
         groups=claims.get("groups", []),          # Group object IDs
         scopes=claims.get("scp", "").split(),     # Space-separated scope string → list
@@ -602,9 +614,10 @@ async def get_current_user(
 ```python
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import os
 
-from agent import ask_agent, reset_session
+from agent import ask_agent
 from api.auth import CurrentUser, get_current_user
 
 app = FastAPI()
@@ -667,8 +680,6 @@ Once you have the `CurrentUser` with `groups`, you can enforce group membership 
 **`api/auth.py`** — add a `require_group` dependency factory
 
 ```python
-from functools import partial
-
 # Map human-readable role names to Entra ID group object IDs
 # Load from environment variables so group IDs can change without code changes
 GROUP_IDS = {
@@ -830,6 +841,7 @@ Use this configuration when all users are in the same Azure AD tenant as the app
 | `agent-spa` | Custom API permissions | `agent.query` (+ `agent.admin` if needed) |
 | Backend `auth.py` | JWKS URL | `https://login.microsoftonline.com/<tenant-id>/discovery/v2.0/keys` |
 | Backend `auth.py` | Issuer | `https://login.microsoftonline.com/<tenant-id>/v2.0` |
+| Backend `auth.py` | Audience | `api://<backend-client-id>` |
 
 #### Admin consent for `agent.query` (recommended)
 
@@ -903,6 +915,10 @@ async def _validate_token(token: str) -> dict:
     Signature, audience, and expiry are verified by python-jose.
     Issuer is not checked by the library (varies per tenant); instead
     the tid claim is validated against the ALLOWED_TENANT_IDS allowlist.
+
+    Audience is the Application ID URI of the backend API (api://<client-id>),
+    not the bare client ID GUID.
+    See: https://learn.microsoft.com/en-us/entra/identity-platform/access-token-claims-reference#payload-claims
     """
     try:
         jwks = await _get_jwks()
@@ -910,7 +926,7 @@ async def _validate_token(token: str) -> dict:
             token,
             jwks,
             algorithms=["RS256"],
-            audience=BACKEND_CLIENT_ID,
+            audience=f"api://{BACKEND_CLIENT_ID}",
             options={
                 "verify_at_hash": False,
                 "verify_iss": False,   # Issuer varies per tenant — validated manually below
@@ -1006,7 +1022,7 @@ Share with a [Cloud Application Administrator](https://learn.microsoft.com/en-us
 
 > **If you are using the minimal `User.Read`-only configuration in this guide**, this error should not occur. `User.Read` has `AdminConsentRequired: No` and does not require admin consent. If you are seeing this screen, check whether `GroupMember.Read.All` or `Directory.Read.All` was added to the app's API permissions in the portal.
 
-**Fix:** A tenant administrator must grant consent. See the [admin consent steps in Step 2](#admin-consent-steps-required-for-groupmemberreadall-and-directoryreadall) for full instructions. The two options are:
+**Fix:** A tenant administrator must grant consent. See the [admin consent steps for elevated permissions](#admin-consent-steps-for-elevated-permissions) in the Permission Configurations Reference for full instructions. The two options are:
 
 **Option 1 — Via the Azure Portal:**
 1. Navigate to **Azure Portal** → **Microsoft Entra ID** → **App registrations** → `agent-spa`
@@ -1036,9 +1052,9 @@ If you removed `GroupMember.Read.All` from the portal, remove `"GroupMember.Read
 
 ### Backend returns 401 — "Token validation failed: Invalid audience"
 
-**Cause:** The token was issued with the frontend client ID as the audience, not the backend API client ID.
+**Cause:** The `audience` value in `jwt.decode` does not match the `aud` claim in the token. For v2.0 access tokens, the `aud` claim is the **Application ID URI** (`api://<client-id>`), not the bare client ID GUID. See [Access token claims reference — `aud`](https://learn.microsoft.com/en-us/entra/identity-platform/access-token-claims-reference#payload-claims).
 
-**Fix:** Ensure the frontend is acquiring a token with the backend scope (`api://<BACKEND_CLIENT_ID>/agent.query`), not a Graph scope, when calling the backend API. Check `apiRequest.scopes` in `authConfig.ts`.
+**Fix:** Ensure `audience=f"api://{BACKEND_CLIENT_ID}"` in `_validate_token` in `api/auth.py`. Also ensure the frontend is acquiring a token with the backend scope (`api://<BACKEND_CLIENT_ID>/agent.query`), not a Graph scope. Check `apiRequest.scopes` in `authConfig.ts`.
 
 ---
 
@@ -1159,10 +1175,9 @@ If your organisation uses B2B collaboration (guest users from external tenants),
 
 To support guest users, follow [Section B — Multi-Tenant](#b--multi-tenant) in the Permission Configurations Reference: change both registrations to `AzureADMultipleOrgs`, grant admin consent in the guest users' home tenant, and update the backend to use the `common` JWKS endpoint with an `ALLOWED_TENANT_IDS` allowlist. See [Azure AD B2B collaboration overview](https://learn.microsoft.com/en-us/entra/external-id/what-is-b2b) for the full Microsoft guidance on B2B access patterns.
 
-
 ### Universal Logout
 
-When a user is disabled or deleted in Entra ID, their existing access tokens remain valid until they expire (up to one hour). For immediate revocation in high-security scenarios, use Continuous Access Evaluation (CAE) — tokens issued with CAE are revocable in near real-time when account state changes in Entra ID.
+When a user is disabled or deleted in Entra ID, their existing access tokens remain valid until they expire (up to one hour). For immediate revocation in high-security scenarios, use Continuous Access Evaluation (CAE) — tokens issued with CAE are revocable in near real-time when account state changes in Entra ID. See [Continuous access evaluation](https://learn.microsoft.com/en-us/entra/identity/conditional-access/concept-continuous-access-evaluation).
 
 ---
 
