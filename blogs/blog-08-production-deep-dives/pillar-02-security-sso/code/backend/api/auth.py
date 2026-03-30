@@ -1,7 +1,6 @@
 import os
 import httpx
 import asyncio
-from functools import lru_cache
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -27,7 +26,7 @@ bearer_scheme = HTTPBearer()
 class CurrentUser(BaseModel):
     """Typed representation of the authenticated user, extracted from the JWT."""
     object_id: str            # Entra ID user object ID (stable unique identifier)
-    upn: str                  # User principal name (email address)
+    upn: str                  # User principal name / preferred_username (email address)
     display_name: str         # Display name
     groups: list[str]         # List of group object IDs the user belongs to
     scopes: list[str]         # API scopes granted in this token (e.g. ["agent.query"])
@@ -62,8 +61,12 @@ async def _validate_token(token: str) -> dict:
     Performs full validation:
     - Signature verification using Entra ID public keys
     - Issuer check: must be this tenant's STS
-    - Audience check: must be this backend API's client ID
+    - Audience check: must match the Application ID URI of this backend API
     - Expiry check: token must not be expired
+
+    The audience for v2.0 access tokens is the Application ID URI
+    (api://<client-id>), not the bare client ID GUID.
+    See: https://learn.microsoft.com/en-us/entra/identity-platform/access-token-claims-reference#payload-claims
 
     Returns the decoded token claims on success.
     Raises HTTPException 401 on any validation failure.
@@ -73,11 +76,12 @@ async def _validate_token(token: str) -> dict:
 
         # Decode and validate the token.
         # python-jose verifies signature, issuer, audience, and expiry automatically.
+        # audience must be the Application ID URI, not the bare client ID GUID.
         claims = jwt.decode(
             token,
             jwks,
             algorithms=["RS256"],
-            audience=BACKEND_CLIENT_ID,
+            audience=f"api://{BACKEND_CLIENT_ID}",
             issuer=ISSUER,
             options={"verify_at_hash": False},  # Not required for access tokens
         )
@@ -106,10 +110,12 @@ async def get_current_user(
     """
     claims = await _validate_token(credentials.credentials)
 
-    # Extract claims — use .get() with defaults to handle optional claims gracefully
+    # Extract claims — use .get() with defaults to handle optional claims gracefully.
+    # preferred_username is the v2.0 claim; upn is the v1.0 equivalent.
+    # Both are checked for compatibility across token endpoint versions.
     return CurrentUser(
         object_id=claims.get("oid", ""),
-        upn=claims.get("upn") or claims.get("preferred_username", ""),
+        upn=claims.get("preferred_username") or claims.get("upn", ""),
         display_name=claims.get("name", ""),
         groups=claims.get("groups", []),          # Group object IDs
         scopes=claims.get("scp", "").split(),     # Space-separated scope string → list

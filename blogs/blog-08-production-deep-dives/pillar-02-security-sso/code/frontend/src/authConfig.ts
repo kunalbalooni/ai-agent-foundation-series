@@ -14,10 +14,15 @@ export const msalConfig: Configuration = {
   },
 };
 
-// Scopes for the login request — Microsoft Graph only
-// Do NOT include backend API scopes here
+// Scopes for the login request — Microsoft Graph only.
+// User.Read is the minimum required for sign-in (AdminConsentRequired: No).
+// Add "GroupMember.Read.All" here only if your use case requires real-time group
+// membership resolution via Graph API (see Permission Configurations Reference in blog.md).
+// If you add a scope here, it must also be registered in the portal under API permissions —
+// mismatches cause AADSTS70011 and block login entirely.
+// Reference: https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-single-page-app-react-sign-in
 export const loginRequest: PopupRequest = {
-  scopes: ["User.Read", "GroupMember.Read.All"],
+  scopes: ["User.Read"],
 };
 
 // Scopes for acquiring a token to call the backend API
