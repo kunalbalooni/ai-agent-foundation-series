@@ -1,0 +1,36 @@
+Change Management Policy
+
+Definition
+A change is any modification to production systems including code deployments, infrastructure updates, database schema changes, configuration changes, and third-party integration updates. All changes must be logged, categorised, and approved before deployment.
+
+Change categories
+- Standard change: Pre-approved, low-risk, follows a documented runbook. No additional approval required.
+- Normal change: Requires review and approval via the change advisory board (CAB) process. Minimum 48-hour lead time.
+- Emergency change: Deployed outside the normal process due to critical business or security need. Must be retroactively logged and reviewed within 24 hours.
+
+Approval workflow
+1. Engineer raises a change request in the change management system with a description, impact assessment, rollback plan, and test evidence.
+2. The change is reviewed by the team lead.
+3. Normal changes are reviewed by the CAB at the weekly change review meeting.
+4. Approved changes are scheduled in the release calendar.
+5. Deployment is confirmed in #deployments with a link to the change record.
+
+Rollback and validation
+- Every change must include a rollback procedure tested in a staging environment.
+- Post-deployment validation checks must be defined before approval.
+- If validation fails after deployment, the rollback procedure is executed immediately.
+
+Emergency changes
+- Emergency changes bypass the CAB process but require real-time approval from the on-call engineering manager.
+- All emergency changes must be documented within 24 hours using the emergency change template.
+- Repeated emergency changes for the same system trigger a mandatory reliability review.
+
+FAQ
+- Q: What counts as a configuration change?
+  A: Any modification to environment variables, feature flags, infrastructure parameters, or third-party service settings that affects production behaviour.
+- Q: Can a standard change be promoted to a normal change?
+  A: Yes, if the scope or risk increases beyond what the standard runbook covers, re-categorise and follow the normal change process.
+- Q: Who chairs the CAB?
+  A: The Release Manager chairs the CAB. Engineering leads, security, and operations are standing members.
+- Q: How long are change records retained?
+  A: Minimum 12 months, or longer if required by applicable compliance frameworks.

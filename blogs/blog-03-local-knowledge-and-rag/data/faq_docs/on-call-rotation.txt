@@ -1,0 +1,37 @@
+On-Call Rotation Policy
+
+Purpose
+The on-call rotation ensures that a qualified engineer is reachable at all times to respond to production incidents, alert escalations, and time-sensitive operational decisions. The rotation distributes this responsibility evenly across the team.
+
+Rotation structure
+- Primary on-call: First responder for all alerts. Must acknowledge within 5 minutes.
+- Secondary on-call: Escalation point if the primary does not respond within 10 minutes. Also available for parallel work during complex incidents.
+- Engineering manager on-call: Escalation for incidents exceeding 45 minutes or requiring business decisions.
+
+Rotation schedule
+- Shifts are 7 days, Monday 09:00 to the following Monday 09:00 local time.
+- The schedule is published in PagerDuty and synced to the team calendar 4 weeks in advance.
+- Engineers rotate onto primary on-call after completing incident response training and shadowing two shifts.
+
+Handoff requirements
+- Outgoing on-call posts a handoff summary in #on-call-handoff at the end of each shift.
+- The summary includes: active incidents, pending change requests, known degradations, and any follow-up actions.
+- Incoming on-call acknowledges the handoff in the same thread.
+
+Swap policy
+- Shift swaps require agreement from both engineers and must be updated in PagerDuty at least 24 hours in advance.
+- Swaps do not change the annual rotation balance — both engineers retain their original shift counts.
+
+Compensation
+- On-call compensation follows the engineering compensation policy. Refer to the HR handbook for current rates.
+- Engineers on sick leave are automatically removed from the rotation and the secondary assumes primary duties.
+
+FAQ
+- Q: What do I do if I cannot respond to a page?
+  A: If you are temporarily unavailable, notify the secondary on-call immediately. Do not let a page go unacknowledged for more than 10 minutes.
+- Q: Can a junior engineer be primary on-call?
+  A: Only after completing the required training and shadow shifts. The engineering manager decides readiness on a case-by-case basis.
+- Q: Who updates PagerDuty when a swap is agreed?
+  A: The engineer initiating the swap is responsible for updating PagerDuty and notifying the team lead.
+- Q: What is the escalation path if both primary and secondary are unreachable?
+  A: Pages escalate automatically to the engineering manager on-call after 15 minutes of no acknowledgment.

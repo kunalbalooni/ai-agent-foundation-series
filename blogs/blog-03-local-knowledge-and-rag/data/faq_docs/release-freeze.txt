@@ -1,0 +1,35 @@
+Release Freeze Policy
+
+Definition
+A release freeze is a period during which no new code deployments, infrastructure changes, or configuration updates are permitted without explicit approval. Freezes are declared to protect service stability ahead of high-risk periods such as major product launches, public holidays, and peak traffic events.
+
+Freeze schedule
+- Standard freeze begins 48 hours before a scheduled release window.
+- Holiday freeze begins 72 hours before a public holiday weekend and lasts until the next business day.
+- Emergency freeze can be declared at any time by the VP Engineering or on-call engineering manager.
+
+Changes allowed during a freeze
+- Critical security patches with VP Engineering approval.
+- Hotfixes that address active SEV1 or SEV2 incidents, with IC sign-off and a documented rollback plan.
+- Documentation and non-code asset updates.
+- All other changes are blocked until the freeze is lifted.
+
+Approval process
+- Submit a freeze exception request in #release-freeze-exceptions with a description, risk assessment, and rollback plan.
+- Exceptions require sign-off from the Release Manager and the on-call engineering manager.
+- Approved exceptions must be logged in the release tracker before deployment begins.
+
+Rollback requirements
+- Any change deployed during a freeze must have a tested, documented rollback plan.
+- Rollback must be executable within 15 minutes of deployment.
+- If rollback is triggered, notify the Release Manager and post in #incidents immediately.
+
+FAQ
+- Q: Who declares a release freeze?
+  A: The Release Manager, VP Engineering, or on-call engineering manager.
+- Q: Can I merge a pull request during a freeze?
+  A: Yes. Merging to the main branch is allowed. Deploying to production is not, unless an exception is approved.
+- Q: How is the freeze communicated?
+  A: Via #engineering-announcements at least 24 hours before it takes effect, and via calendar invite to engineering leads.
+- Q: What happens if an unapproved change is deployed during a freeze?
+  A: An immediate rollback is required. The incident is logged and reviewed in the next reliability meeting.

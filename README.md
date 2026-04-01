@@ -20,8 +20,8 @@ Create a practical, code‑first series that explains not just **how** to build 
 2. **[Controlling Agent Behaviour — Prompt Engineering and State](blogs/blog-02-prompt-engineering-and-state/blog.md)**
    Introduces prompts as control mechanisms (not text generation) and shows how explicit agent state enables predictable, debuggable behaviour.
 
-3. **Teaching the Agent to Use Knowledge — Retrieval‑Augmented Generation (RAG)**
-   Demonstrates why context windows are insufficient and adds document retrieval to ground agent responses in enterprise knowledge.
+3. **[Teaching the Agent to Use Knowledge — Local Knowledge and RAG](blogs/blog-03-local-knowledge-and-rag/blog.md)**
+   Surveys the approaches for grounding agents in local knowledge — from prompt injection and fine-tuning to RAG and agentic retrieval — and implements semantic vector search to scale the agent beyond hardcoded lookups.
 
 4. **Teaching the Agent to Act — Tools, APIs, and Data Access**
    Extends the agent with tools so it can take actions (search, data access, drafting outputs) instead of only responding in text.

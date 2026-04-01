@@ -1,0 +1,40 @@
+Production Deployment Runbook
+
+Purpose
+This runbook defines the standard procedure for deploying application changes to the production environment. All engineers performing production deployments must follow this procedure. Deviations require documented justification and change management approval.
+
+Pre-deployment checklist
+1. Confirm the change request is approved and logged in the change management system.
+2. Verify the deployment is not scheduled during an active release freeze.
+3. Confirm all automated tests pass on the staging environment build that will be promoted.
+4. Notify #deployments of the upcoming deployment: include the change record link, deployment window, and rollback plan.
+5. Confirm the on-call engineer is aware and available during the deployment window.
+
+Deployment steps
+1. Create a deployment tag on the release branch using the format v<MAJOR>.<MINOR>.<PATCH>.
+2. Trigger the deployment pipeline from the CI/CD system. Do not deploy manually outside the pipeline except in a declared emergency.
+3. Monitor the deployment dashboard and application metrics in real time during rollout.
+4. For staged rollouts: deploy to 10% of traffic first. Wait 10 minutes. If error rate is within baseline, proceed to 100%.
+5. Post a deployment complete confirmation in #deployments with a link to the deployment log.
+
+Post-deployment validation
+- Confirm key health checks pass within 5 minutes of deployment completion.
+- Verify core user journeys in the production smoke test suite.
+- Check error rate, latency p95, and saturation metrics against the pre-deployment baseline for at least 15 minutes.
+- If any metric breaches the threshold defined in the service SLO, initiate rollback immediately.
+
+Rollback procedure
+1. Trigger the rollback pipeline to redeploy the previous release tag.
+2. Confirm rollback completes and metrics return to baseline.
+3. Post rollback notification in #deployments and #incidents.
+4. Open a post-deployment review using the standard incident template, even if no user impact occurred.
+
+FAQ
+- Q: Can I deploy directly to production without using the pipeline?
+  A: No. Manual production deployments are prohibited except during a declared emergency, and must be retroactively logged as an emergency change.
+- Q: What constitutes a failed deployment?
+  A: Error rate increase above SLO threshold, latency p95 exceeding 2x baseline, health check failure, or failed smoke tests.
+- Q: Who approves a rollback?
+  A: The deploying engineer can initiate rollback without additional approval. Notify the on-call IC and Release Manager immediately.
+- Q: How long should I monitor after deployment before closing the change?
+  A: Minimum 30 minutes for standard deployments. 60 minutes for deployments that touch data migrations or infrastructure.
