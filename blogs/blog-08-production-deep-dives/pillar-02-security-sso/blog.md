@@ -190,11 +190,34 @@ az ad app update \
 7. Set **Admin consent description:** `Allows the application to send queries to the AI agent on behalf of the signed-in user`
 8. Set **State:** `Enabled`
 9. Click **Add scope**
-10. Repeat for `agent.admin` (for administrative operations)
+10. Repeat for `agent.admin`, with the following **different** settings:
+    - **Scope name:** `agent.admin`
+    - **Who can consent:** `Admins only` ← **important: not "Admins and users"**
+    - **Admin consent display name:** `Administer the AI agent platform`
+    - **Admin consent description:** `Allows access to audit logs, query history of all users, and platform analytics. Requires administrator role assignment.`
+    - **State:** `Enabled`
+    - Click **Add scope**
+
+> **Why `agent.admin` must be "Admins only":**
+> `agent.admin` grants access to organisation-wide audit data — query logs and activity history for all users. If "Admins and users" is selected, any regular employee could self-consent to this scope at login and potentially receive a token granting admin-level access. Setting it to "Admins only" means a tenant administrator must explicitly pre-approve the scope before any user's token can carry it. See [Admin consent for high-privilege permissions](https://learn.microsoft.com/en-us/entra/identity-platform/v2-permissions-and-consent#admin-restricted-permissions).
 
 Your Application ID URI is now `api://<BACKEND_CLIENT_ID>` and the full scope identifiers are:
 - `api://<BACKEND_CLIENT_ID>/agent.query`
 - `api://<BACKEND_CLIENT_ID>/agent.admin`
+
+#### Authorize the frontend SPA (suppress per-user consent prompts)
+
+After creating the scopes, register the frontend SPA as a trusted caller. This tells Entra ID that `agent-api` already trusts `agent-spa`, so users are not prompted to individually consent to the scopes at login.
+
+1. Still in `agent-api` → **Expose an API**
+2. Under **Authorized client applications** → click **+ Add a client application**
+3. In the **Client ID** field, enter the Application (client) ID of `agent-spa`
+4. Under **Authorized scopes**, tick both:
+   - `api://<BACKEND_CLIENT_ID>/agent.query`
+   - `api://<BACKEND_CLIENT_ID>/agent.admin`
+5. Click **Add application**
+
+> **Why this matters:** Without authorizing the client application here, every user sees a consent prompt the first time they log in — even after an administrator has granted tenant-wide consent. Authorizing `agent-spa` here pre-establishes the trust relationship at the application level. The consent screen is bypassed entirely for users logging in from the registered SPA. See [Configure an authorized client application](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-configure-app-expose-web-apis#add-a-client-application).
 
 ---
 
@@ -289,6 +312,17 @@ Install the MSAL libraries:
 ```bash
 npm install @azure/msal-react @azure/msal-browser
 ```
+
+> **Two separate token requests — why this matters:**
+>
+> The frontend makes **two distinct token requests** to Entra ID, for two entirely different purposes:
+>
+> | Object | Scopes | When requested | What it's used for |
+> |---|---|---|---|
+> | `loginRequest` | `User.Read` (Graph only) | At login (interactive) | Sign-in, ID token, establish session |
+> | `apiRequest` | `api://<backend-id>/agent.query` | Per API call (silent) | Authorise calls to the FastAPI backend |
+>
+> **Do not put backend API scopes (`agent.query`) in `loginRequest.scopes`.** Mixing them causes Entra ID to issue a Graph-scoped token at login — which is then rejected by the backend because its `aud` claim points to Microsoft Graph, not your API. Backend tokens are acquired separately via `acquireTokenSilent` (defined in `useApiToken.ts` below) immediately before each API call.
 
 **`src/authConfig.ts`**
 
