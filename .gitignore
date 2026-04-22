@@ -10,4 +10,11 @@ __pycache__/
 *.sqlite
 *.db
 blog-writing-instructions.md
+convert_to_html.py
+convert_to_html.js
+SHARING.md
+node_modules/
+package.json
+package-lock.json
+**/*.html
 

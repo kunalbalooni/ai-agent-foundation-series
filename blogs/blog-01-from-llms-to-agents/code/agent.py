@@ -1,5 +1,8 @@
 import os
 import asyncio
+# import sys  # Uncomment the 3 lines below if you see a DNS/connection error on Windows
+# if sys.platform == "win32":
+#     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 from pathlib import Path
 
 from semantic_kernel.agents import ChatCompletionAgent
@@ -15,6 +18,7 @@ load_dotenv()
 AZURE_OPENAI_ENDPOINT = os.environ["AZURE_OPENAI_ENDPOINT"]
 AZURE_OPENAI_KEY = os.environ["AZURE_OPENAI_API_KEY"]
 AZURE_OPENAI_DEPLOYMENT = os.environ["AZURE_OPENAI_DEPLOYMENT"]  # e.g. "gpt-4o-mini"
+AZURE_OPENAI_API_VERSION = os.environ["AZURE_OPENAI_API_VERSION"]  # e.g. "2025-01-01-preview"
 
 FAQ_DIR = Path("../data/faq_docs")
 
@@ -67,6 +71,7 @@ _agent = ChatCompletionAgent(
         deployment_name=AZURE_OPENAI_DEPLOYMENT,
         endpoint=AZURE_OPENAI_ENDPOINT,
         api_key=AZURE_OPENAI_KEY,
+        api_version=AZURE_OPENAI_API_VERSION,
     ),
     name="Policy-Assistant",
     instructions=instructions,
@@ -79,7 +84,7 @@ _agent = ChatCompletionAgent(
 # the LLM decides whether to call a tool or respond directly.
 async def ask_agent(question: str) -> str:
     response = await _agent.get_response(messages=question)
-    return response.content
+    return str(response)
 
 async def main() -> None:
     user_question = input(
