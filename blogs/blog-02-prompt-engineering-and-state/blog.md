@@ -196,6 +196,64 @@ The FAQ tool and Azure OpenAI backend are unchanged. Four things change, and eac
 3. **A stateful entry point** — `ask_agent()` now reads from and writes to a `ChatHistory` instead of taking a bare string.
 4. **Session endpoints** — the API gains a `session_id` field and a `/reset` endpoint; the UI becomes a chat interface with a reset button.
 
+The architecture from the previous post stays intact — frontend, API, agent system, LLM service. What's new sits inside the agent system: a **session store** keyed by `session_id`, and the **structured system prompt** treated as a first-class component the agent loads on every call. The yellow nodes below mark the additions; everything else carries over unchanged.
+
+```mermaid
+flowchart LR
+    classDef primary   fill:#dbeafe,stroke:#0052cc,color:#1a1a2e,stroke-width:1.5px
+    classDef secondary fill:#d1fae5,stroke:#00c488,color:#1a1a2e,stroke-width:1.5px
+    classDef tertiary  fill:#e2e4f0,stroke:#4a5080,color:#1a1a2e,stroke-width:1.5px
+    classDef new       fill:#fef9c3,stroke:#b45309,color:#1a1a2e,stroke-width:2px
+
+    User[User]
+
+    subgraph Frontend
+        UI[Streamlit Chat UI]
+    end
+
+    subgraph Backend
+        API[FastAPI - /ask and /reset]
+
+        subgraph Agent_System[Agent System]
+            Agent[Agent Control Loop]
+            Prompt[Structured System Prompt]
+            Sessions[(Session Store - session_id to ChatHistory)]
+            Tool[lookup_faq Tool]
+            Docs[(FAQ Documents)]
+        end
+    end
+
+    subgraph LLM_Service[LLM Service]
+        LLM[Azure OpenAI Model]
+    end
+
+    User --> UI
+    UI -->|question + session_id| API
+    API -->|question + session_id| Agent
+
+    Agent -->|read and append| Sessions
+    Agent -->|loads on every call| Prompt
+
+    Agent -->|tool call| Tool
+    Tool --> Docs
+    Docs -->|policy text| Tool
+    Tool --> Agent
+
+    Agent -->|system prompt + full history| LLM
+    LLM -->|completion| Agent
+
+    Agent -->|answer| API
+    API --> UI
+    UI --> User
+
+    class Agent,API primary
+    class Tool,UI,Docs secondary
+    class LLM,User tertiary
+    class Sessions,Prompt new
+```
+
+Two arrows in the diagram are worth pausing on. The **read-and-append** loop between the agent and the session store is what gives a user the same conversation thread on every turn — and what makes the `/reset` endpoint a single-line operation (drop the entry from the dict). The **system prompt + full history** arrow into the LLM is the difference from the previous post: the model no longer receives a bare question, it receives the whole transcript with the structured prompt at the top.
+
 ### The agent code
 
 The agent file carries the bulk of the change. The structured prompt, the session store, and the stateful entry point all live here.
