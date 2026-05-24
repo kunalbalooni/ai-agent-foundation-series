@@ -1,25 +1,33 @@
 # Controlling Agent Behaviour — Prompt Engineering and Explicit State
 
-## Executive summary
+In the previous post, we built a minimum viable agent: one tool, a readable prompt, a single-turn call. It was enough to prove the **plan → act → observe** loop and reach the right policy document. For a demo, that is sufficient. For anything sustained — an agent that real employees use, that downstream systems integrate with, that compliance has to sign off on — it is not.
 
-- The system prompt is not descriptive text — it is the agent's behavioural specification. How it is written determines how consistently the agent performs in production.
-- Unstructured prompts introduce variability in output format, scope enforcement, and fallback behaviour. That variability compounds across multi-turn conversations and downstream integrations.
-- Explicit conversation state — passing the full exchange history to the model on every call — is the mechanism that enables coherent multi-turn reasoning. Without it, each response is context-blind.
-- The two controls introduced in this post (structured prompt + explicit state) are the foundation that every subsequent capability in this series depends on: retrieval, tool orchestration, and multi-agent coordination all require an agent that behaves predictably.
-- In regulated or audited environments, both controls directly support compliance: a structured prompt makes scope and fallback behaviour auditable; explicit state makes the agent's reasoning reproducible.
-- This post advances the agent from Level 1 (prompt-based assistant) to Level 3 (stateful workflow agent) on the Enterprise AI Agent Maturity Model.
+The same question can produce a different format, tone, or level of detail each time the model is called. Follow-up questions like *"and what about exceptions?"* fail, because the agent has no memory of what was just asked. Neither gap is a model-quality problem — a more capable model does not reliably fix either. They are gaps in **how the agent is configured and how its context is managed**, and they are the difference between an agent that works in a sandbox and one that can be put in front of users.
 
----
+In this post we close both gaps with two controls — a **structured system prompt** and **explicit conversation state** — using the same internal policy assistant as the running example. Together, they are what move an agent from "interesting prototype" to "predictable enough to integrate, audit, and operate."
 
-## Strategic context
+## Why this matters before scaling
 
-The previous post built the minimum viable agent: a single tool, a readable prompt, a one-turn call. That was sufficient to demonstrate the plan → act → observe loop. It is not sufficient for sustained use.
+For anyone deciding how far to invest in agent-based systems, the question is rarely *can the LLM answer the question?* It is *will it answer the question the same way tomorrow, and can we explain what it did when something goes wrong?* Both gaps from the previous section feed directly into that question, and each one shows up as a distinct failure mode once a first-pass agent leaves the demo environment.
 
-Two failure patterns appear quickly once an agent moves from demonstration to regular use.
+The first is what variability looks like in practice.
 
-**Failure pattern 1: prompt variability.** A loosely worded prompt leaves decisions to the model on every call — whether to answer out-of-scope questions, how to structure the response, what to say when the policy document doesn't cover the question. Because those decisions are implicit, the model resolves them differently depending on phrasing, temperature, and context. The same question asked twice may produce different formats, different caveats, different lengths. Downstream systems that parse agent output — dashboards, ticketing integrations, automated workflows — cannot rely on a structure that shifts.
+### Failure 1 — Inconsistent behaviour at scale
 
-**Failure pattern 2: stateless reasoning.** The previous post's agent made single-turn calls. Each call passed a bare string with no conversation history. The model had no knowledge of what came before. In a multi-turn exchange, this produces responses that are disconnected from earlier context:
+A loosely worded prompt leaves a long list of decisions to the model on every call: whether to answer an out-of-scope question, how to structure the response, what to say when the policy document is silent, whether to cite a source. Because those decisions are implicit, the model resolves them differently depending on phrasing, temperature, and recent context.
+
+| What the same question might produce | Why it is a problem |
+|---|---|
+| Two-sentence prose answer one call, five-bullet list the next | Downstream systems that parse output cannot rely on shape |
+| A polite answer to an out-of-scope question | Scope creep — the agent is being used for things it was not approved for |
+| An answer with a source citation, then one without | Compliance and audit teams cannot trace responses to policy |
+| Subtly different phrasing of the same policy | Erosion of trust in the agent over time |
+
+None of these are *wrong*. They are *inconsistent*, and inconsistency is what makes an agent un-integratable and un-auditable. The second failure is what happens once you try to hold a conversation with it.
+
+### Failure 2 — Stateless reasoning across turns
+
+A single-turn agent treats every call as the first one. The model has no memory of what was just discussed, so anything that depends on prior context falls apart:
 
 ```
 User:  When does the release freeze start?
@@ -32,122 +40,165 @@ User:  Who approves exceptions?
 Agent: [No context — "exceptions" to what is unresolved]
 ```
 
-The model may infer the correct context from wording alone in simple cases. In longer exchanges, under ambiguous phrasing, or when the conversation crosses topic boundaries, inference-based correctness fails. Design-based correctness — passing the full history explicitly — does not.
+The model can sometimes *infer* the context from wording. In longer exchanges, ambiguous phrasing, or when the conversation crosses topic boundaries, that inference fails. Real conversations do not survive on inference.
 
-Both failures are architectural, not model quality issues. A more capable model does not reliably fix either. Structured prompting and explicit state do.
+Both failures look like model problems but are architectural — and that distinction matters because the fix is not a more expensive model, it is a small change in design. Two design controls close both gaps. The next section introduces them at the level an architect would specify them; the implementation that lands them in code comes later.
 
----
+## The two controls
 
-## Conceptual model
+Closing both failure modes requires two additions on top of the building blocks from the previous post:
 
-### The system prompt as behavioural specification
+**A structured system prompt** — the prompt is the agent's **configuration file**, not a description. It is divided into named sections, each with one responsibility, so behaviour becomes specific, testable, and reviewable by the people who own the underlying policy.
 
-In the previous post, the system prompt was a description: who the agent is and what it can help with. That framing is correct as a starting point. In production, the prompt needs to function as a **behavioural specification** — the agent's configuration file. Like a configuration file, it defines what the agent does and does not do, and callers depend on it being consistent.
+**Explicit conversation state** — instead of sending a bare string on every call, the full **conversation history** is passed to the model on every turn. The agent reasons in context, not in isolation, and that context is inspectable for audit and debugging.
+
+These are small changes to the code. They are large changes to how the agent behaves — and to how defensibly the system can be operated. Each one is worth looking at in turn, starting with the prompt.
+
+### The system prompt as a configuration file
 
 A reliable pattern is to divide the prompt into named sections, each with a single responsibility:
 
 ```
-[PERSONA]       — who the agent is and the tone it uses
-[SCOPE]         — what topics are in and out of bounds
-[TOOL USAGE]    — when and how to call available tools
-[RESPONSE FORMAT] — structure and length constraints on answers
-[UNCERTAINTY]   — what to do when the answer is unknown or out of scope
+[PERSONA]          — who the agent is and the tone it uses
+[SCOPE]            — what topics are in and out of bounds
+[TOOL USAGE]       — when and how to call available tools
+[RESPONSE FORMAT]  — structure and length constraints on answers
+[UNCERTAINTY]      — what to do when the answer is unknown
 ```
 
-Each section is independently testable. Change the response format without touching the tool usage rules. Narrow the scope without changing the persona. The prompt becomes maintainable in the same way code is.
+This is consistent with how the major model providers describe the role of the system prompt. Anthropic's prompt engineering guidance frames the system prompt as the place to *"establish consistent behavior patterns, define constraints and guardrails, and specify formatting requirements"* — distinct concerns that benefit from being addressed separately ([Anthropic, *Prompt engineering overview*](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/overview)). OpenAI's API reference describes the `system` role analogously, as the channel through which developers set the assistant's behaviour, scope, and output format for the rest of the conversation ([OpenAI, *Chat Completions API*](https://developers.openai.com/api/reference/chat-completions/overview)). Anthropic's own engineering write-up on production agents goes further and recommends *"simple, composable patterns rather than complex frameworks"* — a principle that applies as much to prompts as it does to orchestration ([Anthropic, *Building effective agents*](https://www.anthropic.com/research/building-effective-agents)).
 
-### Explicit conversation state
+Each section is independently changeable. Narrowing the agent's scope is a one-section edit, not a rewrite. Changing the response format does not touch the tool-usage rules. The prompt becomes maintainable in the same way code is — and reviewable by the right people: the SCOPE section can be signed off by the policy owner, the TOOL USAGE section by the engineering lead, the RESPONSE FORMAT section by whoever consumes the output downstream.
 
-**Explicit state** means passing the full conversation history — every prior user message and agent response — to the model on every call. The model then reasons in context rather than in isolation.
+For governance and audit, this matters more than it looks. A monolithic prompt is opaque to anyone who did not write it. A sectioned prompt is a specification — what the agent is allowed to do, what it must refuse, and where its outputs come from — that non-engineers can read and approve.
 
-In Semantic Kernel, this is done via a `ChatHistory` object. One `ChatHistory` is created per session. Every exchange is appended to it. On each new call, the entire object is passed to the model.
+The prompt handles consistency. State handles continuity, and the mechanism for that is the second control.
+
+### Explicit state with `ChatHistory`
+
+In Semantic Kernel, conversation state lives in a `ChatHistory` object. One per session. Every user message and every agent reply is appended to it. On every new call, the **entire** history is passed to the model — not just the latest question.
+
+The clearest way to picture this is as a conversation transcript that grows turn by turn. On every call, the agent hands the model the **entire transcript so far** — not just the latest question. The shape is the same one described in the [OpenAI Chat Completions](https://developers.openai.com/api/reference/chat-completions/overview) and [Anthropic Messages](https://docs.anthropic.com/en/api/messages) API references: the system prompt at the top, followed by an alternating record of who said what.
+
+The diagram below shows the same flow as a sequence, with each turn highlighted in its own band. Read it top to bottom — every turn follows the same three-step rhythm (**append → send the whole history → append the reply**), and what grows from turn to turn is the *amount* of history sent on the third arrow:
 
 ```mermaid
 sequenceDiagram
-    participant User
-    participant Agent
-    participant ChatHistory
-    participant LLM
-    participant Tool
+    autonumber
+    participant U as User
+    participant A as Agent
+    participant H as ChatHistory
+    participant L as LLM
 
-    User->>Agent: Question 1
-    Agent->>ChatHistory: Append user message
-    Agent->>LLM: Send full history
-    LLM->>Tool: lookup_faq("release-freeze")
-    Tool-->>LLM: Policy content
-    LLM-->>Agent: Answer 1
-    Agent->>ChatHistory: Append assistant message
-    Agent-->>User: Answer 1
+    rect rgb(219, 234, 254)
+    Note over U,L: Turn 1 - first question, history starts empty
+    U->>A: When does the release freeze start?
+    A->>H: append question
+    A->>L: send full history (system prompt + Q1)
+    L-->>A: Answer 1
+    A->>H: append answer
+    A-->>U: Answer 1
+    end
 
-    User->>Agent: Question 2 (follow-up)
-    Agent->>ChatHistory: Append user message
-    Agent->>LLM: Send full history (Q1 + A1 + Q2)
-    LLM-->>Agent: Answer 2 (in context of Q1)
-    Agent->>ChatHistory: Append assistant message
-    Agent-->>User: Answer 2
+    rect rgb(209, 250, 229)
+    Note over U,L: Turn 2 - that period resolves because Turn 1 is in the history
+    U->>A: What changes are allowed during that period?
+    A->>H: append question
+    A->>L: send full history (system prompt + Q1 + A1 + Q2)
+    L-->>A: Answer 2 (in context of Q1)
+    A->>H: append answer
+    A-->>U: Answer 2
+    end
+
+    rect rgb(254, 249, 195)
+    Note over U,L: Turn 3 - history keeps growing
+    U->>A: Who approves exceptions?
+    A->>H: append question
+    A->>L: send full history (everything so far + Q3)
+    L-->>A: Answer 3 (in context of Q1 + Q2)
+    A->>H: append answer
+    A-->>U: Answer 3
+    end
 ```
 
-The `ChatHistory` object is the agent's working memory for the session. It is inspectable at any point — print it to see exactly what the model received, which makes failures reproducible.
+Each new question is appended; nothing is dropped. The model sees the whole exchange every time, which is what allows references like *"that period"* or *"exceptions"* to resolve to the right policy without the user having to repeat themselves.
+
+The `ChatHistory` is the agent's working memory for the session. Because it is an explicit object — not hidden state inside the model — it can be **inspected, logged, and reproduced**. When an agent gives an unexpected answer in production, the question every architect wants answered is *what did it actually see?* An explicit `ChatHistory` is the answer: the full system prompt, the full conversation, and the tool outputs are all visible. Failures become reproducible. Without that, every incident review is a guess.
+
+One clarification before going further. The word "memory" gets attached to anything an agent remembers, and that conflates two very different controls.
 
 ### State vs. memory — a useful distinction
 
-These two terms are often conflated. They are different controls with different scopes:
+State and memory are often used interchangeably, but an enterprise AI strategy needs both — at different stages, with different controls around them.
 
-| | **State (this post)** | **Memory (upcoming posts)** |
+| | **State** | **Memory** |
 |---|---|---|
 | **Scope** | Within a single session | Across sessions |
 | **Storage** | In-process (`ChatHistory`) | External (vector store, database) |
-| **Typical use** | Multi-turn conversation context | Remembering past incidents, user preferences |
+| **Typical use** | Multi-turn conversation context | Past incidents, user preferences, long-term recall |
 | **Complexity** | Low | Medium–high |
+| **Governance surface** | Session log retention, PII in logs | Long-term data lifecycle, retrieval explainability |
 
-This post covers in-session state. Cross-session memory — retrieving relevant history from an external store — is covered later in the series.
+This post stays on the left column — the context the agent needs to answer *"what about exceptions?"* sensibly inside one conversation. Cross-session memory is a separate problem with its own storage, retrieval, and governance machinery, and it is worth keeping that distinction clean from the start. Conflating the two at the architecture stage leads to over-engineered first attempts; separating them keeps the controls proportionate to the risk.
 
-### What predictable and debuggable means in practice
+With both controls now defined, the payoff is worth stating plainly.
 
-With a structured prompt and explicit state, two properties follow that matter for production:
+### What these two controls buy
 
-**Predictable:** Given the same conversation history and the same policy documents, the agent produces the same category of response. The format, scope enforcement, and citation pattern are consistent. Downstream systems can parse the output reliably.
-
-**Debuggable:** When the agent gives an unexpected answer, you can inspect exactly what it received: the system prompt, the full conversation history, and the tool output. There is no hidden state. The failure is reproducible because the input is fully known.
+A structured prompt and explicit state are the conditions for two properties that matter directly to anyone operating the system at scale. The dependency runs in one direction: each control produces a distinct property, the two properties combine into reliability, and reliability is what unlocks the operational outcomes a sponsor actually cares about — being able to **integrate** the agent, **audit** it, and **operate** it at scale.
 
 ```mermaid
 flowchart LR
-    SP[Structured system prompt] --> Predictable[Consistent output format and scope]
-    CH[Explicit ChatHistory] --> Debuggable[Reproducible, inspectable failures]
-    Predictable --> Reliable[Reliable agent behaviour]
-    Debuggable --> Reliable
+    classDef control  fill:#dbeafe,stroke:#0052cc,color:#1a1a2e,stroke-width:1.5px
+    classDef property fill:#d1fae5,stroke:#00c488,color:#1a1a2e,stroke-width:1.5px
+    classDef outcome  fill:#fef9c3,stroke:#b45309,color:#1a1a2e,stroke-width:1.5px
+    classDef goal     fill:#e2e4f0,stroke:#4a5080,color:#1a1a2e,stroke-width:1.5px
+
+    SP[Structured system prompt]:::control --> P[Predictable output]:::property
+    CH[Explicit ChatHistory]:::control --> D[Debuggable failures]:::property
+    P --> R[Reliable agent behaviour]:::outcome
+    D --> R
+    R --> I[Integratable by downstream systems]:::goal
+    R --> A[Auditable by compliance]:::goal
+    R --> O[Operatable at scale]:::goal
 ```
 
-Predictability and debuggability are not properties of the model — they are properties of the architecture around it. The diagram above shows the direct dependency: structured prompt produces predictable output; explicit history produces debuggable failures. Both feed into reliable behaviour.
+**Predictable** means consistent output format, scope, and fallback behaviour — downstream systems can parse the output reliably, SLAs become meaningful, and end users build accurate intuition for what the agent will and will not do. **Debuggable** means fully inspectable inputs on every call — when something goes wrong, the system prompt, the conversation, and the tool outputs are all visible, so incident reviews run on evidence rather than reconstruction.
 
----
+Predictability and debuggability are not properties of the model. They are properties of the architecture around it. Investing in them early is what makes later capabilities (retrieval, multi-agent coordination, autonomous workflows) safe to deploy at all.
+
+That said, the cost of building both controls only pays off when the agent is going to be operated — not just demonstrated. A few cases do not warrant either.
 
 ## When this is not needed
 
-A structured prompt and explicit state add code and operational complexity. There are cases where neither is justified:
+Structured prompts and explicit state add a small amount of code and operational overhead. Not every use case justifies them. Skip both when:
 
-- **Single-turn, single-purpose tools** — a script that answers one fixed question and exits does not benefit from conversation history. A bare string call is correct.
-- **Internal prototypes and exploratory work** — when the goal is to test whether an LLM can reason over a dataset at all, prompt structure and state management are premature. Build them when the behaviour needs to be repeatable.
-- **Batch processing pipelines** — agents that process records in isolation, with no follow-up questions, do not need session state.
+- The agent is a **one-shot script** answering a single fixed question. There is no conversation to keep state for, and no integration to depend on output shape.
+- The work is an **internal prototype** intended to test whether an LLM can reason over a dataset at all. Add structure once behaviour needs to be repeatable.
+- The agent runs as a **batch pipeline** over independent records with no follow-up questions. State has no role.
 
-Add structure when behaviour needs to be consistent, auditable, or multi-turn. Do not add it because it seems more complete.
+Add structure when behaviour needs to be consistent, auditable, or multi-turn. The decision is not technical — it is whether the agent is going to be operated, not just demonstrated. For the cases where it is, the rest of this post shows what the two controls actually look like in code.
 
----
+## Implementation for practitioners
 
-## Code implementation
+The remainder of the post is the hands-on portion: how the two controls land in code, what changes from the previous post's implementation, and how to run it locally. Readers focused on strategy or architecture can skip ahead to the closing note without losing the thread.
 
-The previous post established the agent's core: a tool, a prompt, an LLM call. This post makes two targeted changes to that foundation — a restructured system prompt and a stateful invocation path — and extends the API and UI to support multi-turn sessions.
+We are keeping the same scenario from the previous post — the internal policy assistant for release freezes and SEV1 incidents — and the same three-file structure:
 
-Four code patterns appear in this update:
+- **`agent.py`** — the agent logic (LLM + tool + prompt + history)
+- **`api.py`** — a thin HTTP wrapper
+- **`streamlit.py`** — a minimal browser UI
 
-1. **Structured system prompt** — replaces the readable description with a specification divided into named sections.
-2. **In-process session store** — a `dict[str, ChatHistory]` that maps session IDs to conversation histories. Each user gets an isolated context.
-3. **Stateful agent entry point** — `ask_agent()` now appends to and reads from `ChatHistory` rather than passing a bare string.
-4. **Session management endpoints** — the API gains a `session_id` field and a `/reset` endpoint; the UI gains a chat interface and a reset button.
+The FAQ tool and Azure OpenAI backend are unchanged. Four things change, and each one corresponds directly to something covered above:
 
-The scenario is the same internal policy assistant from the previous post. The FAQ tool and Azure OpenAI backend are unchanged.
+1. **The system prompt** is restructured into the named sections we just described.
+2. **A session store** — a `dict[str, ChatHistory]` — gives each user their own conversation context.
+3. **A stateful entry point** — `ask_agent()` now reads from and writes to a `ChatHistory` instead of taking a bare string.
+4. **Session endpoints** — the API gains a `session_id` field and a `/reset` endpoint; the UI becomes a chat interface with a reset button.
 
-### Full example
+### The agent code
+
+The agent file carries the bulk of the change. The structured prompt, the session store, and the stateful entry point all live here.
 
 **agent.py**
 
@@ -305,9 +356,9 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-The `get_or_create_history()` function is the session store's public interface — every call that needs history goes through it. `ask_agent()` appends the user message before calling the model and the assistant message after, so the history is always complete regardless of how the function is called.
+The `get_or_create_history()` function is the session store's only entry point — every call that needs history goes through it. `ask_agent()` appends the user message *before* calling the model and the assistant message *after*, so the history is always complete regardless of how the function is called.
 
-The API and UI layers extend the same session model across HTTP.
+That covers the agent itself. The API and UI layers extend the same idea over HTTP so each client can keep its own session.
 
 **api.py**
 
@@ -343,6 +394,8 @@ async def reset(req: ResetRequest):
     reset_session(req.session_id)
     return {"status": "reset", "session_id": req.session_id}
 ```
+
+The UI generates a unique session per browser tab and sends both the question and the session ID with every request.
 
 **streamlit.py**
 
@@ -411,9 +464,9 @@ with st.sidebar:
         st.rerun()
 ```
 
----
+### Example run
 
-## Example run
+With all three files in place, the example below walks through the same multi-turn conversation that broke for the first-pass agent and shows it working end-to-end.
 
 ```bash
 # 1) Set up the virtual environment (skip if carried over from the previous post)
@@ -450,54 +503,24 @@ curl -X POST http://127.0.0.1:8000/ask \
 streamlit run streamlit.py
 ```
 
----
+### A few things worth fixing before this leaves your local machine
 
-## Enterprise considerations
+The implementation runs locally and behaves predictably, but a handful of rough edges only show up once it leaves your local machine. None are blockers in development; all four are worth closing before production.
 
-### Security
+**Session history lives in process memory.** The `dict[str, ChatHistory]` is fine for a single process. It is lost on restart, and if sessions are never cleared, it leaks. Swap it for an external store (Redis, Azure Cache, a database) with a TTL per session record before going to production.
 
-The in-process session store (`dict[str, ChatHistory]`) holds conversation history in memory. In production, this has two risks: history is lost on server restart, and a memory leak is possible if sessions are never explicitly cleared. Replace the in-process dict with an external store (Redis, Azure Cache, a database) with a TTL on session records.
+**Session IDs are caller-supplied.** Any caller that knows or guesses another user's session ID can read or reset their history. In production, bind session IDs to authenticated identities — do not treat them as opaque tokens.
 
-The `session_id` in the API is currently caller-supplied and unvalidated. Any caller that knows or guesses a session ID can read or reset another user's history. In production, bind session IDs to authenticated identities — do not treat them as opaque tokens.
+**Long conversations eventually overflow the context window.** Token usage grows linearly with conversation length — a 10-turn chat costs roughly 10x the input tokens of a single turn. Either cap conversation length or summarise older turns before the history exceeds the model's limit.
 
-### Governance
+**Observability stops at local logs.** Printing `ChatHistory` is enough to debug a single session, but in production you want trace-level visibility across prompts, tool calls, latency, and token spend — wire the agent into [OpenTelemetry](https://opentelemetry.io/) via Semantic Kernel's built-in OTEL hooks so traces land in the same backend (Azure Monitor, Grafana, Datadog) as the rest of your services.
 
-The SCOPE section of the structured prompt is the primary governance control in this agent. It defines what the agent will and will not answer. That boundary should be reviewed by whoever owns the policy domain, not just the engineering team that writes it. Treat changes to the SCOPE section with the same review process as changes to policy documents themselves.
+One thing to test explicitly is the SCOPE section of the prompt. Ask questions that are *adjacent to but outside* the defined topics ("how do I deploy to staging?" if the scope is release freeze and SEV1) and verify the refusal is consistent. Scope drift under paraphrasing is the most common place a structured prompt slips, and the agent's predictability depends on catching it before users do.
 
-### Observability
+## Closing note
 
-The `ChatHistory` object is the agent's full reasoning context for a session. Log it (with appropriate PII controls) rather than just the final answer. When an agent gives an unexpected response, the history log tells you exactly what it received — system prompt, prior turns, tool output — which is the information needed to reproduce and diagnose the failure.
+The two controls introduced in this post are not optimisations. They are the minimum conditions for an agent that behaves consistently enough to be useful in an enterprise setting — and reproducibly enough to be operated, audited, and integrated with the systems around it. Skipping this layer and moving straight to more complex capabilities (retrieval, orchestration, multi-agent coordination) is the most common reason agent systems work in pilots and fall over in production.
 
-### Failure modes
+For practitioners building along, the fastest way to internalise the difference is to use the agent. Open the Streamlit UI, ask three follow-up questions, hit reset, watch the thread vanish. Edit one section of the system prompt at a time — narrow the scope, change the response format — and observe how the behaviour shifts without breaking the rest. That separation is the whole point of structuring the prompt in the first place.
 
-The most common failure for structured prompts is **scope drift under paraphrasing**: a user asks a question that is technically outside the defined scope but phrased in a way that resembles an in-scope question. The model may answer it. The SCOPE section's "respond exactly" instruction reduces but does not eliminate this. Test the scope boundary explicitly — ask questions that are adjacent to but outside the defined topics and verify the refusal is consistent.
-
-The most common failure for explicit state is **context window exhaustion**: long conversations eventually exceed the model's context limit. The current implementation does not truncate history. In production, implement a windowing strategy — keep the last N turns, or summarise older turns into a compressed representation — before the history exceeds the model's limit.
-
-### Cost impact
-
-Passing the full conversation history on every call means token usage grows linearly with conversation length. A 10-turn conversation costs roughly 10 times as many input tokens as a single turn. For high-volume deployments, monitor per-session token counts and enforce session length limits or implement history summarisation.
-
----
-
-## Maturity model tie-in
-
-The previous post moved the agent from Level 1 (prompt-based assistant) to Level 2 (tool-augmented agent) by adding a tool call. This post advances to **Level 3 — Stateful workflow agents**.
-
-**Enterprise AI Agent Maturity Model:**
-
-1. Level 1 — Prompt-based assistants
-2. Level 2 — Tool-augmented agents
-3. **Level 3 — Stateful workflow agents** ← this post
-4. Level 4 — Multi-agent orchestration
-5. Level 5 — Production-governed AI systems
-
-Level 3 is the minimum viable architecture for an agent used in sustained, multi-turn enterprise workflows. Without explicit state and a structured prompt, agent behaviour is non-deterministic across sessions and cannot be audited or reliably integrated with other systems.
-
----
-
-## Closing insight
-
-The two controls introduced here — structured prompt and explicit conversation state — are not optimisations. They are the minimum conditions for an agent that behaves consistently enough to be useful in an enterprise context. Every capability that follows in this series (retrieval, orchestration, multi-agent coordination) assumes an agent that operates within defined boundaries and reasons coherently across turns. Skipping this foundation and moving directly to more complex patterns is the most common cause of agent systems that work in demos and fail in production.
-
-The next architectural layer introduces retrieval-augmented generation (RAG): loading knowledge from a real document corpus so the agent can answer questions across a much larger knowledge base without stuffing everything into the context window. The patterns established here — structured prompt with explicit tool usage rules, explicit conversation history — are the integration surface that RAG attaches to.
+**What's next:** the next post adds **retrieval-augmented generation (RAG)** — loading a real document corpus so the agent can answer questions across a much larger knowledge base without stuffing everything into the prompt. The structured prompt and explicit history we just built are exactly where RAG will plug in.
